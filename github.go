@@ -11,6 +11,30 @@ import (
 
 var errRateLimit = errors.New("GitHub API rate limit exceeded")
 
+type RateLimitResponse struct {
+	Resources struct {
+		Core struct {
+			Remaining int   `json:"remaining"`
+			Reset     int64 `json:"reset"`
+		} `json:"core"`
+	} `json:"resources"`
+}
+
+// fetchRateLimitReset returns the time when the rate limit resets.
+func fetchRateLimitReset() time.Time {
+	// rate_limit endpoint itself doesn't count against the limit
+	cmd := exec.Command("gh", "api", "rate_limit")
+	out, err := cmd.Output()
+	if err != nil {
+		return time.Time{}
+	}
+	var resp RateLimitResponse
+	if err := json.Unmarshal(out, &resp); err != nil {
+		return time.Time{}
+	}
+	return time.Unix(resp.Resources.Core.Reset, 0)
+}
+
 type WorkflowRun struct {
 	ID           int64     `json:"id"`
 	Name         string    `json:"name"`

@@ -1,0 +1,8 @@
+watches:
+  - repo: "owner/repo-name"
+    workflows:
+      - "ci.yml"
+      - "deploy.yml"
+  # - repo: "owner/other-repo"
+  #   workflows:
+  #     - "build.yml"

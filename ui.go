@@ -41,32 +41,73 @@ var (
 	spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 )
 
+const (
+	activeInterval   = 10 * time.Second
+	inactiveInterval = 60 * time.Second
+	recentThreshold  = 60 * time.Second // run started within this = "active"
+)
+
+type watchKey struct {
+	repo     string
+	workflow string
+}
+
+type watchState struct {
+	runs      []RunInfo
+	lastFetch time.Time
+	active    bool // has in-progress run or recent activity
+}
+
 type tickMsg time.Time
 
-type pollResultMsg struct {
+type fetchResultMsg struct {
+	key       watchKey
 	runs      []RunInfo
 	err       error
 	rateLimit bool
 }
 
 type model struct {
-	config       Config
-	runs         []RunInfo
-	err          error
-	rateLimited  bool
-	spinnerIndex int
-	width        int
+	config         Config
+	watches        map[watchKey]*watchState
+	watchOrder     []watchKey // stable ordering for display
+	err            error
+	rateLimited    bool
+	rateLimitReset time.Time
+	fetching       map[watchKey]bool // prevent overlapping fetches
+	spinnerIndex   int
+	width          int
 }
 
 func newModel(cfg Config) model {
+	watches := make(map[watchKey]*watchState)
+	var order []watchKey
+	for _, w := range cfg.Watches {
+		for _, wf := range w.Workflows {
+			key := watchKey{w.Repo, wf}
+			if _, exists := watches[key]; !exists {
+				watches[key] = &watchState{}
+				order = append(order, key)
+			}
+		}
+	}
 	return model{
-		config: cfg,
-		width:  80,
+		config:     cfg,
+		watches:    watches,
+		watchOrder: order,
+		fetching:   make(map[watchKey]bool),
+		width:      80,
 	}
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(tickCmd(), pollCmd(m.config, 0))
+	// Fetch all on startup in parallel
+	var cmds []tea.Cmd
+	cmds = append(cmds, tickCmd())
+	for key := range m.watches {
+		cmds = append(cmds, fetchCmd(key))
+	}
+	return tea.Batch(cmds...)
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -75,6 +116,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
+		case "r":
+			var cmds []tea.Cmd
+			for key := range m.watches {
+				if !m.fetching[key] {
+					m.fetching[key] = true
+					cmds = append(cmds, fetchCmd(key))
+				}
+			}
+			return m, tea.Batch(cmds...)
 		}
 
 	case tea.WindowSizeMsg:
@@ -82,28 +132,69 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tickMsg:
 		m.spinnerIndex = (m.spinnerIndex + 1) % len(spinnerFrames)
-		return m, tickCmd()
 
-	case pollResultMsg:
+		var cmds []tea.Cmd
+		cmds = append(cmds, tickCmd())
+
+		if !m.rateLimited {
+			now := time.Now()
+			for key, state := range m.watches {
+				if m.fetching[key] {
+					continue
+				}
+				interval := inactiveInterval
+				if state.active {
+					interval = activeInterval
+				}
+				if now.Sub(state.lastFetch) >= interval {
+					m.fetching[key] = true
+					cmds = append(cmds, fetchCmd(key))
+				}
+			}
+		}
+
+		return m, tea.Batch(cmds...)
+
+	case rateLimitRetryMsg:
+		return handleRateLimitRetry(m)
+
+	case fetchResultMsg:
+		delete(m.fetching, msg.key)
+
 		if msg.rateLimit {
 			m.rateLimited = true
-			return m, pollCmd(m.config, 30*time.Second)
+			m.rateLimitReset = fetchRateLimitReset()
+			return m, scheduleRateLimitRetry(m.rateLimitReset)
 		}
+
 		m.rateLimited = false
+		m.rateLimitReset = time.Time{}
+
+		state := m.watches[msg.key]
 		if msg.err != nil {
 			m.err = msg.err
 		} else {
-			m.runs = msg.runs
+			state.runs = msg.runs
+			state.lastFetch = time.Now()
+			state.active = isActive(msg.runs)
 			m.err = nil
 		}
-		delay := 10 * time.Second
-		if hasActiveRuns(m.runs) {
-			delay = 5 * time.Second
-		}
-		return m, pollCmd(m.config, delay)
 	}
 
 	return m, nil
+}
+
+// isActive returns true if any run is in-progress or started recently.
+func isActive(runs []RunInfo) bool {
+	for _, r := range runs {
+		if r.Run.Status == "in_progress" {
+			return true
+		}
+		if time.Since(r.Run.RunStartedAt) < recentThreshold {
+			return true
+		}
+	}
+	return false
 }
 
 func (m model) View() string {
@@ -111,7 +202,12 @@ func (m model) View() string {
 
 	title := "  GitHub Actions Monitor"
 	if m.rateLimited {
-		title += runningStyle.Render("  [rate limited, backing off]")
+		remaining := time.Until(m.rateLimitReset)
+		if remaining > 0 {
+			title += runningStyle.Render(fmt.Sprintf("  [rate limited, resets in %s]", formatDuration(remaining)))
+		} else {
+			title += runningStyle.Render("  [rate limited, retrying...]")
+		}
 	}
 	b.WriteString(titleStyle.Render(title))
 	b.WriteString("\n")
@@ -123,7 +219,13 @@ func (m model) View() string {
 		b.WriteString("\n")
 	}
 
-	if len(m.runs) == 0 && m.err == nil {
+	// Collect all runs for display
+	var allRuns []RunInfo
+	for _, state := range m.watches {
+		allRuns = append(allRuns, state.runs...)
+	}
+
+	if len(allRuns) == 0 && m.err == nil {
 		b.WriteString(dimStyle.Render("  Loading..."))
 		b.WriteString("\n")
 		return b.String()
@@ -132,7 +234,7 @@ func (m model) View() string {
 	// Check if all repos share the same owner
 	sameOwner := true
 	var commonOwner string
-	for _, r := range m.runs {
+	for _, r := range allRuns {
 		owner := r.Repo
 		if idx := strings.Index(r.Repo, "/"); idx >= 0 {
 			owner = r.Repo[:idx]
@@ -158,7 +260,7 @@ func (m model) View() string {
 	type groupKey struct{ repo, workflow string }
 	groups := make(map[groupKey][]RunInfo)
 	var order []groupKey
-	for _, r := range m.runs {
+	for _, r := range allRuns {
 		key := groupKey{r.Repo, r.Workflow}
 		if _, exists := groups[key]; !exists {
 			order = append(order, key)
@@ -236,7 +338,7 @@ func (m model) View() string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString(dimStyle.Render("  Press q to quit"))
+	b.WriteString(dimStyle.Render("  r: refresh  q: quit"))
 	b.WriteString("\n")
 
 	return b.String()
@@ -306,60 +408,36 @@ func tickCmd() tea.Cmd {
 	})
 }
 
-func hasActiveRuns(runs []RunInfo) bool {
-	for _, r := range runs {
-		if r.Run.Status == "in_progress" {
-			return true
+func fetchCmd(key watchKey) tea.Cmd {
+	return func() tea.Msg {
+		runs, err := fetchRuns(key.repo, key.workflow)
+		if err != nil && errors.Is(err, errRateLimit) {
+			return fetchResultMsg{key: key, rateLimit: true}
 		}
+		return fetchResultMsg{key: key, runs: runs, err: err}
 	}
-	return false
 }
 
-func pollCmd(cfg Config, delay time.Duration) tea.Cmd {
-	return func() tea.Msg {
-		time.Sleep(delay)
+type rateLimitRetryMsg struct{}
 
-		type result struct {
-			runs      []RunInfo
-			err       error
-			rateLimit bool
-		}
-
-		type fetchTask struct {
-			repo     string
-			workflow string
-		}
-
-		var tasks []fetchTask
-		for _, w := range cfg.Watches {
-			for _, wf := range w.Workflows {
-				tasks = append(tasks, fetchTask{w.Repo, wf})
-			}
-		}
-
-		ch := make(chan result, len(tasks))
-		for _, t := range tasks {
-			go func(repo, wf string) {
-				runs, err := fetchRuns(repo, wf)
-				if err != nil && errors.Is(err, errRateLimit) {
-					ch <- result{rateLimit: true}
-					return
-				}
-				ch <- result{runs: runs, err: err}
-			}(t.repo, t.workflow)
-		}
-
-		var allRuns []RunInfo
-		for range tasks {
-			r := <-ch
-			if r.rateLimit {
-				return pollResultMsg{rateLimit: true}
-			}
-			if r.err != nil {
-				return pollResultMsg{err: r.err}
-			}
-			allRuns = append(allRuns, r.runs...)
-		}
-		return pollResultMsg{runs: allRuns}
+func scheduleRateLimitRetry(resetAt time.Time) tea.Cmd {
+	wait := time.Until(resetAt) + 2*time.Second
+	if wait < 10*time.Second {
+		wait = 10 * time.Second
 	}
+	return tea.Tick(wait, func(t time.Time) tea.Msg {
+		return rateLimitRetryMsg{}
+	})
+}
+
+// rateLimitRetryMsg triggers a re-fetch of all watches after rate limit expires.
+func handleRateLimitRetry(m model) (model, tea.Cmd) {
+	m.rateLimited = false
+	m.rateLimitReset = time.Time{}
+	var cmds []tea.Cmd
+	for key := range m.watches {
+		m.fetching[key] = true
+		cmds = append(cmds, fetchCmd(key))
+	}
+	return m, tea.Batch(cmds...)
 }
