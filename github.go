@@ -94,7 +94,7 @@ func ghAPI(endpoint string) ([]byte, error) {
 	return out, nil
 }
 
-// fetchRuns returns in-progress and the latest completed run for a repo/workflow.
+// fetchRuns returns in-progress runs and completed runs (latest per branch within 24h).
 func fetchRuns(repo, workflow string) ([]RunInfo, error) {
 	endpoint := fmt.Sprintf("repos/%s/actions/workflows/%s/runs?per_page=5&status=in_progress", repo, workflow)
 	data, err := ghAPI(endpoint)
@@ -119,27 +119,86 @@ func fetchRuns(repo, workflow string) ([]RunInfo, error) {
 		})
 	}
 
-	// Fetch latest completed run
-	completedEndpoint := fmt.Sprintf("repos/%s/actions/workflows/%s/runs?per_page=1&status=completed", repo, workflow)
+	// Fetch recent completed runs — enough to cover multiple branches
+	completedEndpoint := fmt.Sprintf("repos/%s/actions/workflows/%s/runs?per_page=20&status=completed", repo, workflow)
 	completedData, err := ghAPI(completedEndpoint)
-	if err == nil {
-		var completedResp WorkflowRunsResponse
-		if err := json.Unmarshal(completedData, &completedResp); err == nil && len(completedResp.WorkflowRuns) > 0 {
-			run := completedResp.WorkflowRuns[0]
-			jobURL := ""
-			if run.Conclusion == "failure" {
-				_, jobURL = fetchFailedJob(repo, run.ID)
-			}
-			results = append(results, RunInfo{
-				Run:      run,
-				JobURL:   jobURL,
-				Repo:     repo,
-				Workflow: workflow,
-			})
+	if err != nil {
+		return results, nil
+	}
+
+	var completedResp WorkflowRunsResponse
+	if err := json.Unmarshal(completedData, &completedResp); err != nil || len(completedResp.WorkflowRuns) == 0 {
+		return results, nil
+	}
+
+	cutoff := time.Now().Add(-24 * time.Hour)
+
+	// Keep latest run per branch within 24h
+	latestPerBranch := make(map[string]WorkflowRun)
+	for _, run := range completedResp.WorkflowRuns {
+		if run.RunStartedAt.Before(cutoff) {
+			continue
+		}
+		if _, exists := latestPerBranch[run.HeadBranch]; !exists {
+			latestPerBranch[run.HeadBranch] = run
 		}
 	}
 
+	// Branches with in-progress runs definitely exist
+	activeBranches := make(map[string]bool)
+	for _, r := range results {
+		if r.Run.Status == "in_progress" {
+			activeBranches[r.Run.HeadBranch] = true
+		}
+	}
+
+	// Check branch existence in parallel
+	type branchCheck struct {
+		branch string
+		run    WorkflowRun
+		exists bool
+	}
+	ch := make(chan branchCheck, len(latestPerBranch))
+	for branch, run := range latestPerBranch {
+		go func(b string, r WorkflowRun) {
+			exists := activeBranches[b] || branchExists(repo, b)
+			ch <- branchCheck{b, r, exists}
+		}(branch, run)
+	}
+
+	var recentRuns []WorkflowRun
+	for range latestPerBranch {
+		check := <-ch
+		if check.exists {
+			recentRuns = append(recentRuns, check.run)
+		}
+	}
+
+	// If nothing matched, fall back to the overall latest completed run
+	if len(recentRuns) == 0 {
+		recentRuns = []WorkflowRun{completedResp.WorkflowRuns[0]}
+	}
+
+	for _, run := range recentRuns {
+		jobURL := ""
+		if run.Conclusion == "failure" {
+			_, jobURL = fetchFailedJob(repo, run.ID)
+		}
+		results = append(results, RunInfo{
+			Run:      run,
+			JobURL:   jobURL,
+			Repo:     repo,
+			Workflow: workflow,
+		})
+	}
+
 	return results, nil
+}
+
+func branchExists(repo, branch string) bool {
+	endpoint := fmt.Sprintf("repos/%s/git/ref/heads/%s", repo, branch)
+	_, err := ghAPI(endpoint)
+	return err == nil
 }
 
 func fetchJobs(repo string, runID int64) ([]Job, error) {

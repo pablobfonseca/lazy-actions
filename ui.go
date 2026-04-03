@@ -309,25 +309,31 @@ func (m model) View() string {
 			}
 		}
 
-		// Show latest completed
+		// Show completed runs (sorted most recent first)
+		var completed []RunInfo
 		for _, r := range runs {
 			if r.Run.Status == "completed" {
-				hasContent = true
-				duration := formatDuration(r.Run.UpdatedAt.Sub(r.Run.RunStartedAt))
-				ago := formatTimeAgo(time.Since(r.Run.UpdatedAt))
-				branch := branchStyle.Render(r.Run.HeadBranch)
-
-				icon, style := conclusionDisplay(r.Run.Conclusion)
-				b.WriteString(fmt.Sprintf("    %s %s  %s  %s  %s",
-					style.Render(icon),
-					style.Render(duration),
-					branch,
-					dimStyle.Render(ago+" ago"),
-					hyperlink(runURL(r), style.Render(r.Run.Conclusion)),
-				))
-				b.WriteString("\n")
-				break
+				completed = append(completed, r)
 			}
+		}
+		sort.Slice(completed, func(i, j int) bool {
+			return completed[i].Run.RunStartedAt.After(completed[j].Run.RunStartedAt)
+		})
+		for _, r := range completed {
+			hasContent = true
+			duration := formatDuration(r.Run.UpdatedAt.Sub(r.Run.RunStartedAt))
+			ago := formatTimeAgo(time.Since(r.Run.UpdatedAt))
+			branch := branchStyle.Render(r.Run.HeadBranch)
+
+			icon, style := conclusionDisplay(r.Run.Conclusion)
+			b.WriteString(fmt.Sprintf("    %s %s  %s  %s  %s",
+				style.Render(icon),
+				style.Render(duration),
+				branch,
+				dimStyle.Render(ago+" ago"),
+				hyperlink(runURL(r), style.Render(r.Run.Conclusion)),
+			))
+			b.WriteString("\n")
 		}
 
 		if !hasContent {
