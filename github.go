@@ -60,8 +60,10 @@ type JobStep struct {
 
 type Job struct {
 	Name       string    `json:"name"`
+	Status     string    `json:"status"`
 	HTMLURL    string    `json:"html_url"`
 	Conclusion string    `json:"conclusion"`
+	StartedAt  time.Time `json:"started_at"`
 	Steps      []JobStep `json:"steps"`
 }
 
@@ -69,13 +71,20 @@ type JobsResponse struct {
 	Jobs []Job `json:"jobs"`
 }
 
-// RunInfo is the combined view of a workflow run with its current step.
-type RunInfo struct {
-	Run         WorkflowRun
+type JobInfo struct {
+	Name        string
+	Status      string // "in_progress", "queued", "waiting"
 	CurrentStep string
-	JobURL      string // direct link to the relevant job
-	Repo        string
-	Workflow    string
+	URL         string
+	StartedAt   time.Time
+}
+
+// RunInfo is the combined view of a workflow run with its active/failed jobs.
+type RunInfo struct {
+	Run      WorkflowRun
+	Jobs     []JobInfo // active jobs (in-progress) or the failed job (completed)
+	Repo     string
+	Workflow string
 }
 
 func ghAPI(endpoint string) ([]byte, error) {
@@ -109,13 +118,12 @@ func fetchRuns(repo, workflow string) ([]RunInfo, error) {
 
 	var results []RunInfo
 	for _, run := range resp.WorkflowRuns {
-		step, jobURL := fetchActiveJob(repo, run.ID)
+		jobs := fetchActiveJobs(repo, run.ID)
 		results = append(results, RunInfo{
-			Run:         run,
-			CurrentStep: step,
-			JobURL:      jobURL,
-			Repo:        repo,
-			Workflow:    workflow,
+			Run:      run,
+			Jobs:     jobs,
+			Repo:     repo,
+			Workflow: workflow,
 		})
 	}
 
@@ -180,13 +188,13 @@ func fetchRuns(repo, workflow string) ([]RunInfo, error) {
 	}
 
 	for _, run := range recentRuns {
-		jobURL := ""
+		var jobs []JobInfo
 		if run.Conclusion == "failure" {
-			_, jobURL = fetchFailedJob(repo, run.ID)
+			jobs = fetchFailedJobs(repo, run.ID)
 		}
 		results = append(results, RunInfo{
 			Run:      run,
-			JobURL:   jobURL,
+			Jobs:     jobs,
 			Repo:     repo,
 			Workflow: workflow,
 		})
@@ -214,46 +222,87 @@ func fetchJobs(repo string, runID int64) ([]Job, error) {
 	return resp.Jobs, nil
 }
 
-// fetchActiveJob returns the current step name and job URL for an in-progress run.
-func fetchActiveJob(repo string, runID int64) (string, string) {
+// fetchActiveJobs returns all in-progress, queued, or waiting jobs.
+func fetchActiveJobs(repo string, runID int64) []JobInfo {
 	jobs, err := fetchJobs(repo, runID)
 	if err != nil {
-		return "", ""
+		return nil
 	}
 
+	var result []JobInfo
 	for _, job := range jobs {
-		for _, step := range job.Steps {
-			if step.Status == "in_progress" {
-				return step.Name, job.HTMLURL
+		switch job.Status {
+		case "waiting", "queued", "pending":
+			result = append(result, JobInfo{
+				Name:      job.Name,
+				Status:    job.Status,
+				URL:       job.HTMLURL,
+				StartedAt: job.StartedAt,
+			})
+		case "in_progress":
+			result = append(result, JobInfo{
+				Name:        job.Name,
+				Status:      job.Status,
+				CurrentStep: currentStepForJob(job),
+				URL:         job.HTMLURL,
+				StartedAt:   job.StartedAt,
+			})
+		case "completed":
+			// Skip completed jobs in an active run
+		}
+	}
+
+	// Fallback: if no active jobs yet, show the last completed step
+	if len(result) == 0 {
+		for i := len(jobs) - 1; i >= 0; i-- {
+			for j := len(jobs[i].Steps) - 1; j >= 0; j-- {
+				if jobs[i].Steps[j].Status == "completed" {
+					return []JobInfo{{
+						Name:        jobs[i].Name,
+						Status:      "in_progress",
+						CurrentStep: jobs[i].Steps[j].Name,
+						URL:         jobs[i].HTMLURL,
+						StartedAt:   jobs[i].StartedAt,
+					}}
+				}
 			}
 		}
 	}
 
-	// Fallback: last completed step
-	for i := len(jobs) - 1; i >= 0; i-- {
-		for j := len(jobs[i].Steps) - 1; j >= 0; j-- {
-			if jobs[i].Steps[j].Status == "completed" {
-				return jobs[i].Steps[j].Name, jobs[i].HTMLURL
-			}
-		}
-	}
-
-	return "", ""
+	return result
 }
 
-// fetchFailedJob returns the name and URL of the first failed job.
-func fetchFailedJob(repo string, runID int64) (string, string) {
-	jobs, err := fetchJobs(repo, runID)
-	if err != nil {
-		return "", ""
-	}
-
-	for _, job := range jobs {
-		if job.Conclusion == "failure" {
-			return job.Name, job.HTMLURL
+func currentStepForJob(job Job) string {
+	for _, step := range job.Steps {
+		if step.Status == "in_progress" {
+			return step.Name
 		}
 	}
+	// Job is queued or waiting — show last completed step if any
+	for i := len(job.Steps) - 1; i >= 0; i-- {
+		if job.Steps[i].Status == "completed" {
+			return job.Steps[i].Name
+		}
+	}
+	return ""
+}
 
-	return "", ""
+// fetchFailedJobs returns all failed jobs for a completed run.
+func fetchFailedJobs(repo string, runID int64) []JobInfo {
+	jobs, err := fetchJobs(repo, runID)
+	if err != nil {
+		return nil
+	}
+
+	var result []JobInfo
+	for _, job := range jobs {
+		if job.Conclusion == "failure" {
+			result = append(result, JobInfo{
+				Name: job.Name,
+				URL:  job.HTMLURL,
+			})
+		}
+	}
+	return result
 }
 

@@ -294,18 +294,38 @@ func (m model) View() string {
 				elapsed := formatDuration(time.Since(r.Run.RunStartedAt))
 				spinner := runningStyle.Render(spinnerFrames[m.spinnerIndex])
 				branch := branchStyle.Render(r.Run.HeadBranch)
-				step := ""
-				if r.CurrentStep != "" {
-					step = stepStyle.Render(r.CurrentStep)
-				}
 
-				b.WriteString(fmt.Sprintf("    %s %s  %s  %s",
-					spinner,
-					runningStyle.Render(elapsed),
-					branch,
-					hyperlink(runURL(r), step),
-				))
-				b.WriteString("\n")
+				if len(r.Jobs) <= 1 {
+					// Single job — compact display
+					url := r.Run.HTMLURL
+					detail := ""
+					if len(r.Jobs) == 1 {
+						url = r.Jobs[0].URL
+						detail = renderJobDetail(r.Jobs[0], m.spinnerIndex)
+					}
+					b.WriteString(fmt.Sprintf("    %s %s  %s  %s",
+						spinner,
+						runningStyle.Render(elapsed),
+						branch,
+						hyperlink(url, detail),
+					))
+					b.WriteString("\n")
+				} else {
+					// Multiple concurrent jobs
+					b.WriteString(fmt.Sprintf("    %s %s  %s",
+						spinner,
+						runningStyle.Render(elapsed),
+						branch,
+					))
+					b.WriteString("\n")
+					for _, job := range r.Jobs {
+						b.WriteString(fmt.Sprintf("      %s %s",
+							dimStyle.Render("├"),
+							renderJobLine(job, m.spinnerIndex),
+						))
+						b.WriteString("\n")
+					}
+				}
 			}
 		}
 
@@ -326,12 +346,38 @@ func (m model) View() string {
 			branch := branchStyle.Render(r.Run.HeadBranch)
 
 			icon, style := conclusionDisplay(r.Run.Conclusion)
+			conclusionURL := r.Run.HTMLURL
+			conclusionText := style.Render(r.Run.Conclusion)
+
+			if len(r.Jobs) == 1 {
+				conclusionURL = r.Jobs[0].URL
+				conclusionText = style.Render(r.Run.Conclusion + ": " + r.Jobs[0].Name)
+			} else if len(r.Jobs) > 1 {
+				// Multiple failed jobs — show them individually
+				b.WriteString(fmt.Sprintf("    %s %s  %s  %s  %s",
+					style.Render(icon),
+					style.Render(duration),
+					branch,
+					dimStyle.Render(ago+" ago"),
+					style.Render(r.Run.Conclusion),
+				))
+				b.WriteString("\n")
+				for _, job := range r.Jobs {
+					b.WriteString(fmt.Sprintf("      %s %s",
+						dimStyle.Render("├"),
+						hyperlink(job.URL, style.Render(job.Name)),
+					))
+					b.WriteString("\n")
+				}
+				continue
+			}
+
 			b.WriteString(fmt.Sprintf("    %s %s  %s  %s  %s",
 				style.Render(icon),
 				style.Render(duration),
 				branch,
 				dimStyle.Render(ago+" ago"),
-				hyperlink(runURL(r), style.Render(r.Run.Conclusion)),
+				hyperlink(conclusionURL, conclusionText),
 			))
 			b.WriteString("\n")
 		}
@@ -350,12 +396,39 @@ func (m model) View() string {
 	return b.String()
 }
 
-// runURL returns the most specific URL available: job URL if present, otherwise run URL.
-func runURL(r RunInfo) string {
-	if r.JobURL != "" {
-		return r.JobURL
+var waitingStyle = lipgloss.NewStyle().
+	Foreground(lipgloss.Color("245")).
+	Italic(true)
+
+// renderJobDetail renders a single job's status for the compact (single-job) view.
+func renderJobDetail(job JobInfo, _ int) string {
+	switch job.Status {
+	case "waiting", "queued", "pending":
+		elapsed := ""
+		if !job.StartedAt.IsZero() {
+			elapsed = formatDuration(time.Since(job.StartedAt)) + " "
+		}
+		return waitingStyle.Render(fmt.Sprintf("%s%s", elapsed, job.Status))
+	default:
+		return stepStyle.Render(job.CurrentStep)
 	}
-	return r.Run.HTMLURL
+}
+
+// renderJobLine renders a single job's status for the multi-job tree view.
+func renderJobLine(job JobInfo, spinnerIndex int) string {
+	switch job.Status {
+	case "waiting", "queued", "pending":
+		elapsed := ""
+		if !job.StartedAt.IsZero() {
+			elapsed = " " + formatDuration(time.Since(job.StartedAt))
+		}
+		return hyperlink(job.URL, waitingStyle.Render(fmt.Sprintf("%s  %s%s", job.Name, job.Status, elapsed)))
+	default:
+		return fmt.Sprintf("%s  %s",
+			hyperlink(job.URL, runningStyle.Render(job.Name)),
+			stepStyle.Render(job.CurrentStep),
+		)
+	}
 }
 
 // hyperlink wraps text in an OSC 8 terminal hyperlink escape sequence.
