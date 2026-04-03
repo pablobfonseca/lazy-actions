@@ -187,7 +187,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // isActive returns true if any run is in-progress or started recently.
 func isActive(runs []RunInfo) bool {
 	for _, r := range runs {
-		if r.Run.Status == "in_progress" {
+		if r.Run.Status == "in_progress" || r.Run.Status == "waiting" {
 			return true
 		}
 		if time.Since(r.Run.RunStartedAt) < recentThreshold {
@@ -289,17 +289,23 @@ func (m model) View() string {
 
 		hasContent := false
 		for _, r := range runs {
-			if r.Run.Status == "in_progress" {
+			if r.Run.Status == "in_progress" || r.Run.Status == "waiting" {
 				hasContent = true
 				elapsed := formatDuration(time.Since(r.Run.RunStartedAt))
 				spinner := runningStyle.Render(spinnerFrames[m.spinnerIndex])
 				branch := branchStyle.Render(r.Run.HeadBranch)
 
 				if len(r.Jobs) <= 1 {
-					// Single job — compact display
 					url := r.Run.HTMLURL
 					detail := ""
-					if len(r.Jobs) == 1 {
+					if r.Run.Status == "waiting" {
+						// Always link to main run page so user can approve/skip
+						if len(r.Jobs) == 1 {
+							detail = renderJobDetail(r.Jobs[0], m.spinnerIndex)
+						} else {
+							detail = waitingStyle.Render("waiting")
+						}
+					} else if len(r.Jobs) == 1 {
 						url = r.Jobs[0].URL
 						detail = renderJobDetail(r.Jobs[0], m.spinnerIndex)
 					}
@@ -311,7 +317,6 @@ func (m model) View() string {
 					))
 					b.WriteString("\n")
 				} else {
-					// Multiple concurrent jobs
 					b.WriteString(fmt.Sprintf("    %s %s  %s",
 						spinner,
 						runningStyle.Render(elapsed),

@@ -103,21 +103,42 @@ func ghAPI(endpoint string) ([]byte, error) {
 	return out, nil
 }
 
-// fetchRuns returns in-progress runs and completed runs (latest per branch within 24h).
+// fetchRuns returns in-progress/waiting runs and completed runs (latest per branch within 24h).
 func fetchRuns(repo, workflow string) ([]RunInfo, error) {
-	endpoint := fmt.Sprintf("repos/%s/actions/workflows/%s/runs?per_page=5&status=in_progress", repo, workflow)
-	data, err := ghAPI(endpoint)
-	if err != nil {
-		return nil, err
+	// Fetch both in_progress and waiting runs in parallel
+	type fetchResult struct {
+		runs []WorkflowRun
+		err  error
+	}
+	ch := make(chan fetchResult, 2)
+	for _, status := range []string{"in_progress", "waiting"} {
+		go func(s string) {
+			endpoint := fmt.Sprintf("repos/%s/actions/workflows/%s/runs?per_page=5&status=%s", repo, workflow, s)
+			data, err := ghAPI(endpoint)
+			if err != nil {
+				ch <- fetchResult{err: err}
+				return
+			}
+			var resp WorkflowRunsResponse
+			if err := json.Unmarshal(data, &resp); err != nil {
+				ch <- fetchResult{err: fmt.Errorf("parsing runs: %w", err)}
+				return
+			}
+			ch <- fetchResult{runs: resp.WorkflowRuns}
+		}(status)
 	}
 
-	var resp WorkflowRunsResponse
-	if err := json.Unmarshal(data, &resp); err != nil {
-		return nil, fmt.Errorf("parsing runs: %w", err)
+	var activeRuns []WorkflowRun
+	for range 2 {
+		res := <-ch
+		if res.err != nil {
+			return nil, res.err
+		}
+		activeRuns = append(activeRuns, res.runs...)
 	}
 
 	var results []RunInfo
-	for _, run := range resp.WorkflowRuns {
+	for _, run := range activeRuns {
 		jobs := fetchActiveJobs(repo, run.ID)
 		results = append(results, RunInfo{
 			Run:      run,
@@ -155,7 +176,7 @@ func fetchRuns(repo, workflow string) ([]RunInfo, error) {
 	// Branches with in-progress runs definitely exist
 	activeBranches := make(map[string]bool)
 	for _, r := range results {
-		if r.Run.Status == "in_progress" {
+		if r.Run.Status == "in_progress" || r.Run.Status == "waiting" {
 			activeBranches[r.Run.HeadBranch] = true
 		}
 	}
@@ -166,17 +187,17 @@ func fetchRuns(repo, workflow string) ([]RunInfo, error) {
 		run    WorkflowRun
 		exists bool
 	}
-	ch := make(chan branchCheck, len(latestPerBranch))
+	branchCh := make(chan branchCheck, len(latestPerBranch))
 	for branch, run := range latestPerBranch {
 		go func(b string, r WorkflowRun) {
 			exists := activeBranches[b] || branchExists(repo, b)
-			ch <- branchCheck{b, r, exists}
+			branchCh <- branchCheck{b, r, exists}
 		}(branch, run)
 	}
 
 	var recentRuns []WorkflowRun
 	for range latestPerBranch {
-		check := <-ch
+		check := <-branchCh
 		if check.exists {
 			recentRuns = append(recentRuns, check.run)
 		}
