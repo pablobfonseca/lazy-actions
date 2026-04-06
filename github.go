@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -88,7 +90,7 @@ type RunInfo struct {
 }
 
 func ghAPI(endpoint string) ([]byte, error) {
-	cmd := exec.Command("gh", "api", endpoint, "--cache", "0s")
+	cmd := exec.Command("gh", "api", endpoint)
 	out, err := cmd.Output()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
@@ -104,7 +106,7 @@ func ghAPI(endpoint string) ([]byte, error) {
 }
 
 // fetchRuns returns in-progress/waiting runs and completed runs (latest per branch within 24h).
-func fetchRuns(repo, workflow string) ([]RunInfo, error) {
+func fetchRuns(repo, workflow string, branchCache *BranchCache) ([]RunInfo, error) {
 	// Fetch both in_progress and waiting runs in parallel
 	type fetchResult struct {
 		runs []WorkflowRun
@@ -181,25 +183,28 @@ func fetchRuns(repo, workflow string) ([]RunInfo, error) {
 		}
 	}
 
-	// Check branch existence in parallel
-	type branchCheck struct {
-		branch string
-		run    WorkflowRun
-		exists bool
+	// Collect branches needing existence checks (skip active ones)
+	var branchesToCheck []string
+	for branch := range latestPerBranch {
+		if !activeBranches[branch] {
+			branchesToCheck = append(branchesToCheck, branch)
+		}
 	}
-	branchCh := make(chan branchCheck, len(latestPerBranch))
-	for branch, run := range latestPerBranch {
-		go func(b string, r WorkflowRun) {
-			exists := activeBranches[b] || branchExists(repo, b)
-			branchCh <- branchCheck{b, r, exists}
-		}(branch, run)
+
+	// Check cache first, then batch-fetch missing branches via GraphQL
+	cached, missing := branchCache.Lookup(repo, branchesToCheck)
+	if len(missing) > 0 {
+		fresh := batchBranchExists(repo, missing)
+		branchCache.Store(repo, fresh)
+		for b, exists := range fresh {
+			cached[b] = exists
+		}
 	}
 
 	var recentRuns []WorkflowRun
-	for range latestPerBranch {
-		check := <-branchCh
-		if check.exists {
-			recentRuns = append(recentRuns, check.run)
+	for branch, run := range latestPerBranch {
+		if activeBranches[branch] || cached[branch] {
+			recentRuns = append(recentRuns, run)
 		}
 	}
 
@@ -224,10 +229,116 @@ func fetchRuns(repo, workflow string) ([]RunInfo, error) {
 	return results, nil
 }
 
-func branchExists(repo, branch string) bool {
-	endpoint := fmt.Sprintf("repos/%s/git/ref/heads/%s", repo, branch)
-	_, err := ghAPI(endpoint)
-	return err == nil
+func ghGraphQL(query string) ([]byte, error) {
+	cmd := exec.Command("gh", "api", "graphql", "-f", "query="+query)
+	out, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			stderr := string(exitErr.Stderr)
+			if strings.Contains(stderr, "rate limit") || strings.Contains(stderr, "403") {
+				return nil, fmt.Errorf("%w: graphql", errRateLimit)
+			}
+			return nil, fmt.Errorf("gh api graphql: %s", stderr)
+		}
+		return nil, fmt.Errorf("gh api graphql: %w", err)
+	}
+	return out, nil
+}
+
+// batchBranchExists checks multiple branches in a single GraphQL query.
+// Returns a map of branch name -> exists. On error, optimistically treats all as existing.
+func batchBranchExists(repo string, branches []string) map[string]bool {
+	result := make(map[string]bool, len(branches))
+	if len(branches) == 0 {
+		return result
+	}
+
+	parts := strings.SplitN(repo, "/", 2)
+	if len(parts) != 2 {
+		for _, b := range branches {
+			result[b] = true
+		}
+		return result
+	}
+	owner, name := parts[0], parts[1]
+
+	var refs strings.Builder
+	for i, branch := range branches {
+		refs.WriteString("b")
+		refs.WriteString(strconv.Itoa(i))
+		refs.WriteString(": ref(qualifiedName: ")
+		refs.WriteString(strconv.Quote("refs/heads/" + branch))
+		refs.WriteString(") { id }\n")
+	}
+
+	query := fmt.Sprintf(`{ repository(owner: %s, name: %s) { %s } }`,
+		strconv.Quote(owner), strconv.Quote(name), refs.String())
+
+	out, err := ghGraphQL(query)
+	if err != nil {
+		// Optimistic fallback: treat all as existing
+		for _, b := range branches {
+			result[b] = true
+		}
+		return result
+	}
+
+	var resp struct {
+		Data struct {
+			Repository map[string]json.RawMessage `json:"repository"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(out, &resp); err != nil {
+		for _, b := range branches {
+			result[b] = true
+		}
+		return result
+	}
+
+	for i, branch := range branches {
+		alias := "b" + strconv.Itoa(i)
+		raw, ok := resp.Data.Repository[alias]
+		result[branch] = ok && string(raw) != "null"
+	}
+	return result
+}
+
+// BranchCache provides thread-safe cross-workflow caching of branch existence.
+type BranchCache struct {
+	mu    sync.Mutex
+	cache map[string]map[string]bool // repo -> branch -> exists
+}
+
+func NewBranchCache() *BranchCache {
+	return &BranchCache{cache: make(map[string]map[string]bool)}
+}
+
+// Lookup returns cached results and a list of branches not yet in the cache.
+func (bc *BranchCache) Lookup(repo string, branches []string) (found map[string]bool, missing []string) {
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
+	repoBranches := bc.cache[repo]
+	found = make(map[string]bool, len(branches))
+	for _, b := range branches {
+		if exists, ok := repoBranches[b]; ok {
+			found[b] = exists
+		} else {
+			missing = append(missing, b)
+		}
+	}
+	return
+}
+
+// Store saves branch existence results into the cache.
+func (bc *BranchCache) Store(repo string, results map[string]bool) {
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
+	if bc.cache[repo] == nil {
+		bc.cache[repo] = make(map[string]bool)
+	}
+	for branch, exists := range results {
+		bc.cache[repo][branch] = exists
+	}
 }
 
 func fetchJobs(repo string, runID int64) ([]Job, error) {

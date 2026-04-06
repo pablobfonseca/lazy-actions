@@ -77,6 +77,8 @@ type model struct {
 	fetching       map[watchKey]bool // prevent overlapping fetches
 	spinnerIndex   int
 	width          int
+	height         int
+	branchCache    *BranchCache
 }
 
 func newModel(cfg Config) model {
@@ -92,11 +94,12 @@ func newModel(cfg Config) model {
 		}
 	}
 	return model{
-		config:     cfg,
-		watches:    watches,
-		watchOrder: order,
-		fetching:   make(map[watchKey]bool),
-		width:      80,
+		config:      cfg,
+		watches:     watches,
+		watchOrder:  order,
+		fetching:    make(map[watchKey]bool),
+		width:       80,
+		branchCache: NewBranchCache(),
 	}
 }
 
@@ -105,7 +108,7 @@ func (m model) Init() tea.Cmd {
 	var cmds []tea.Cmd
 	cmds = append(cmds, tickCmd())
 	for key := range m.watches {
-		cmds = append(cmds, fetchCmd(key))
+		cmds = append(cmds, fetchCmd(key, m.branchCache))
 	}
 	return tea.Batch(cmds...)
 }
@@ -121,7 +124,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			for key := range m.watches {
 				if !m.fetching[key] {
 					m.fetching[key] = true
-					cmds = append(cmds, fetchCmd(key))
+					cmds = append(cmds, fetchCmd(key, m.branchCache))
 				}
 			}
 			return m, tea.Batch(cmds...)
@@ -129,6 +132,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
+		m.height = msg.Height
 
 	case tickMsg:
 		m.spinnerIndex = (m.spinnerIndex + 1) % len(spinnerFrames)
@@ -148,7 +152,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				if now.Sub(state.lastFetch) >= interval {
 					m.fetching[key] = true
-					cmds = append(cmds, fetchCmd(key))
+					cmds = append(cmds, fetchCmd(key, m.branchCache))
 				}
 			}
 		}
@@ -398,7 +402,16 @@ func (m model) View() string {
 	b.WriteString(dimStyle.Render("  r: refresh  q: quit"))
 	b.WriteString("\n")
 
-	return b.String()
+	// Truncate to terminal height so the top (most recent) stays visible
+	output := b.String()
+	if m.height > 0 {
+		lines := strings.Split(output, "\n")
+		if len(lines) > m.height {
+			lines = lines[:m.height]
+		}
+		output = strings.Join(lines, "\n")
+	}
+	return output
 }
 
 var waitingStyle = lipgloss.NewStyle().
@@ -492,9 +505,9 @@ func tickCmd() tea.Cmd {
 	})
 }
 
-func fetchCmd(key watchKey) tea.Cmd {
+func fetchCmd(key watchKey, bc *BranchCache) tea.Cmd {
 	return func() tea.Msg {
-		runs, err := fetchRuns(key.repo, key.workflow)
+		runs, err := fetchRuns(key.repo, key.workflow, bc)
 		if err != nil && errors.Is(err, errRateLimit) {
 			return fetchResultMsg{key: key, rateLimit: true}
 		}
@@ -521,7 +534,7 @@ func handleRateLimitRetry(m model) (model, tea.Cmd) {
 	var cmds []tea.Cmd
 	for key := range m.watches {
 		m.fetching[key] = true
-		cmds = append(cmds, fetchCmd(key))
+		cmds = append(cmds, fetchCmd(key, m.branchCache))
 	}
 	return m, tea.Batch(cmds...)
 }
