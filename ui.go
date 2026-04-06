@@ -79,6 +79,7 @@ type model struct {
 	width          int
 	height         int
 	branchCache    *BranchCache
+	notifyTracker  *NotifyTracker
 }
 
 func newModel(cfg Config) model {
@@ -94,12 +95,13 @@ func newModel(cfg Config) model {
 		}
 	}
 	return model{
-		config:      cfg,
-		watches:     watches,
-		watchOrder:  order,
-		fetching:    make(map[watchKey]bool),
-		width:       80,
-		branchCache: NewBranchCache(),
+		config:        cfg,
+		watches:       watches,
+		watchOrder:    order,
+		fetching:      make(map[watchKey]bool),
+		width:         80,
+		branchCache:   NewBranchCache(),
+		notifyTracker: NewNotifyTracker(),
 	}
 }
 
@@ -178,6 +180,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.err = msg.err
 		} else {
+			m.notifyTracker.CheckAndNotify(msg.key, msg.runs)
 			state.runs = msg.runs
 			state.lastFetch = time.Now()
 			state.active = isActive(msg.runs)
