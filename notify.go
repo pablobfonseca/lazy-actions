@@ -50,18 +50,18 @@ func (nt *NotifyTracker) CheckAndNotify(key watchKey, runs []RunInfo) {
 		prev, tracked := nt.states[id]
 		nt.states[id] = newState
 
-		if firstFetch || !tracked {
+		if firstFetch {
 			continue
 		}
 
-		if prev.status == newState.status && prev.conclusion == newState.conclusion {
+		if tracked && prev.status == newState.status && prev.conclusion == newState.conclusion {
 			continue
 		}
 
-		label := fmt.Sprintf("%s — %s", r.Workflow, r.Run.HeadBranch)
+		label := fmt.Sprintf("%s — %s / %s", r.Repo, r.Workflow, r.Run.HeadBranch)
 
 		switch {
-		case newState.status == "in_progress" && prev.status != "in_progress":
+		case newState.status == "in_progress" && (!tracked || prev.status != "in_progress"):
 			go sendNotification(notification{
 				title:   "▶ Started",
 				message: label,
