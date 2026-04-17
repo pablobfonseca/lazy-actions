@@ -11,36 +11,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-var (
-	titleStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("39"))
-
-	repoStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("212"))
-
-	runningStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("220"))
-
-	successStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("82"))
-
-	failureStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("196"))
-
-	dimStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("245"))
-
-	stepStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("117"))
-
-	branchStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("141"))
-
-	spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-)
-
 const (
 	activeInterval   = 10 * time.Second
 	inactiveInterval = 180 * time.Second
@@ -443,10 +413,6 @@ func (m model) View() string {
 	}
 	return output
 }
-
-var waitingStyle = lipgloss.NewStyle().
-	Foreground(lipgloss.Color("245")).
-	Italic(true)
 
 // renderJobDetail renders a single job's status for the compact (single-job) view.
 func renderJobDetail(job JobInfo, _ int) string {
