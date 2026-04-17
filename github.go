@@ -46,6 +46,7 @@ type WorkflowRun struct {
 	RunStartedAt time.Time `json:"run_started_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 	HTMLURL      string    `json:"html_url"`
+	Path         string    `json:"path"`
 }
 
 type WorkflowRunsResponse struct {
@@ -105,125 +106,160 @@ func ghAPI(endpoint string) ([]byte, error) {
 	return out, nil
 }
 
-// fetchRuns returns in-progress/waiting runs and completed runs (latest per branch within 24h).
-func fetchRuns(repo, workflow string, branchCache *BranchCache) ([]RunInfo, error) {
-	// Fetch both in_progress and waiting runs in parallel
-	type fetchResult struct {
-		runs []WorkflowRun
-		err  error
+// fetchRepoRuns fetches all runs for a repo in 3 API calls (in_progress, waiting, completed)
+// instead of 3 calls per workflow. Results are filtered to watched workflows by path.
+func fetchRepoRuns(repo string, workflows []string, branchCache *BranchCache, jobCache *JobCache) (map[string][]RunInfo, error) {
+	// Map workflow file paths to config names for filtering
+	watchedPaths := make(map[string]string, len(workflows))
+	for _, wf := range workflows {
+		watchedPaths[".github/workflows/"+wf] = wf
 	}
-	ch := make(chan fetchResult, 2)
-	for _, status := range []string{"in_progress", "waiting"} {
+
+	// Fetch in_progress, waiting, and completed in parallel (3 calls total per repo)
+	type statusResult struct {
+		status string
+		runs   []WorkflowRun
+		err    error
+	}
+	ch := make(chan statusResult, 3)
+
+	for _, status := range []string{"in_progress", "waiting", "completed"} {
 		go func(s string) {
-			endpoint := fmt.Sprintf("repos/%s/actions/workflows/%s/runs?per_page=5&status=%s", repo, workflow, s)
+			perPage := 20
+			if s == "completed" {
+				// Need enough to cover all watched workflows across branches
+				perPage = 100
+			}
+			endpoint := fmt.Sprintf("repos/%s/actions/runs?per_page=%d&status=%s", repo, perPage, s)
 			data, err := ghAPI(endpoint)
 			if err != nil {
-				ch <- fetchResult{err: err}
+				ch <- statusResult{status: s, err: err}
 				return
 			}
 			var resp WorkflowRunsResponse
 			if err := json.Unmarshal(data, &resp); err != nil {
-				ch <- fetchResult{err: fmt.Errorf("parsing runs: %w", err)}
+				ch <- statusResult{status: s, err: fmt.Errorf("parsing runs: %w", err)}
 				return
 			}
-			ch <- fetchResult{runs: resp.WorkflowRuns}
+			ch <- statusResult{status: s, runs: resp.WorkflowRuns}
 		}(status)
 	}
 
-	var activeRuns []WorkflowRun
-	for range 2 {
+	var activeRuns, completedRuns []WorkflowRun
+	for range 3 {
 		res := <-ch
 		if res.err != nil {
 			return nil, res.err
 		}
-		activeRuns = append(activeRuns, res.runs...)
+		if res.status == "completed" {
+			completedRuns = res.runs
+		} else {
+			activeRuns = append(activeRuns, res.runs...)
+		}
 	}
 
-	var results []RunInfo
-	for _, run := range activeRuns {
-		jobs := fetchActiveJobs(repo, run.ID)
-		results = append(results, RunInfo{
-			Run:      run,
-			Jobs:     jobs,
-			Repo:     repo,
-			Workflow: workflow,
-		})
+	// Filter runs to only watched workflows
+	filterByWorkflow := func(runs []WorkflowRun) map[string][]WorkflowRun {
+		byWf := make(map[string][]WorkflowRun)
+		for _, run := range runs {
+			if wf, ok := watchedPaths[run.Path]; ok {
+				byWf[wf] = append(byWf[wf], run)
+			}
+		}
+		return byWf
 	}
 
-	// Fetch recent completed runs — enough to cover multiple branches
-	completedEndpoint := fmt.Sprintf("repos/%s/actions/workflows/%s/runs?per_page=20&status=completed", repo, workflow)
-	completedData, err := ghAPI(completedEndpoint)
-	if err != nil {
-		return results, nil
+	activeByWf := filterByWorkflow(activeRuns)
+	completedByWf := filterByWorkflow(completedRuns)
+
+	results := make(map[string][]RunInfo)
+
+	// Process active runs with job caching
+	for wf, runs := range activeByWf {
+		if len(runs) > 5 {
+			runs = runs[:5]
+		}
+		for _, run := range runs {
+			var jobs []JobInfo
+			if cached, ok := jobCache.Get(run.ID, run.UpdatedAt); ok {
+				jobs = cached
+			} else {
+				jobs = fetchActiveJobs(repo, run.ID)
+				jobCache.Set(run.ID, run.UpdatedAt, jobs)
+			}
+			results[wf] = append(results[wf], RunInfo{
+				Run:      run,
+				Jobs:     jobs,
+				Repo:     repo,
+				Workflow: wf,
+			})
+		}
 	}
 
-	var completedResp WorkflowRunsResponse
-	if err := json.Unmarshal(completedData, &completedResp); err != nil || len(completedResp.WorkflowRuns) == 0 {
-		return results, nil
-	}
-
+	// Process completed runs per workflow (latest per branch within 24h)
 	cutoff := time.Now().Add(-24 * time.Hour)
-
-	// Keep latest run per branch within 24h
-	latestPerBranch := make(map[string]WorkflowRun)
-	for _, run := range completedResp.WorkflowRuns {
-		if run.RunStartedAt.Before(cutoff) {
-			continue
+	for wf, runs := range completedByWf {
+		latestPerBranch := make(map[string]WorkflowRun)
+		for _, run := range runs {
+			if run.RunStartedAt.Before(cutoff) {
+				continue
+			}
+			if _, exists := latestPerBranch[run.HeadBranch]; !exists {
+				latestPerBranch[run.HeadBranch] = run
+			}
 		}
-		if _, exists := latestPerBranch[run.HeadBranch]; !exists {
-			latestPerBranch[run.HeadBranch] = run
-		}
-	}
 
-	// Branches with in-progress runs definitely exist
-	activeBranches := make(map[string]bool)
-	for _, r := range results {
-		if r.Run.Status == "in_progress" || r.Run.Status == "waiting" {
-			activeBranches[r.Run.HeadBranch] = true
+		// Branches with active runs definitely exist
+		activeBranches := make(map[string]bool)
+		for _, run := range activeByWf[wf] {
+			activeBranches[run.HeadBranch] = true
 		}
-	}
 
-	// Collect branches needing existence checks (skip active ones)
-	var branchesToCheck []string
-	for branch := range latestPerBranch {
-		if !activeBranches[branch] {
-			branchesToCheck = append(branchesToCheck, branch)
+		var branchesToCheck []string
+		for branch := range latestPerBranch {
+			if !activeBranches[branch] {
+				branchesToCheck = append(branchesToCheck, branch)
+			}
 		}
-	}
 
-	// Check cache first, then batch-fetch missing branches via GraphQL
-	cached, missing := branchCache.Lookup(repo, branchesToCheck)
-	if len(missing) > 0 {
-		fresh := batchBranchExists(repo, missing)
-		branchCache.Store(repo, fresh)
-		for b, exists := range fresh {
-			cached[b] = exists
+		cached, missing := branchCache.Lookup(repo, branchesToCheck)
+		if len(missing) > 0 {
+			fresh := batchBranchExists(repo, missing)
+			branchCache.Store(repo, fresh)
+			for b, exists := range fresh {
+				cached[b] = exists
+			}
 		}
-	}
 
-	var recentRuns []WorkflowRun
-	for branch, run := range latestPerBranch {
-		if activeBranches[branch] || cached[branch] {
-			recentRuns = append(recentRuns, run)
+		var recentRuns []WorkflowRun
+		for branch, run := range latestPerBranch {
+			if activeBranches[branch] || cached[branch] {
+				recentRuns = append(recentRuns, run)
+			}
 		}
-	}
 
-	// If nothing matched, fall back to the overall latest completed run
-	if len(recentRuns) == 0 {
-		recentRuns = []WorkflowRun{completedResp.WorkflowRuns[0]}
-	}
-
-	for _, run := range recentRuns {
-		var jobs []JobInfo
-		if run.Conclusion == "failure" {
-			jobs = fetchFailedJobs(repo, run.ID)
+		// Fallback: latest completed run for this workflow
+		if len(recentRuns) == 0 && len(runs) > 0 {
+			recentRuns = []WorkflowRun{runs[0]}
 		}
-		results = append(results, RunInfo{
-			Run:      run,
-			Jobs:     jobs,
-			Repo:     repo,
-			Workflow: workflow,
-		})
+
+		for _, run := range recentRuns {
+			var jobs []JobInfo
+			if run.Conclusion == "failure" {
+				if cachedJobs, ok := jobCache.Get(run.ID, run.UpdatedAt); ok {
+					jobs = cachedJobs
+				} else {
+					jobs = fetchFailedJobs(repo, run.ID)
+					jobCache.Set(run.ID, run.UpdatedAt, jobs)
+				}
+			}
+			results[wf] = append(results[wf], RunInfo{
+				Run:      run,
+				Jobs:     jobs,
+				Repo:     repo,
+				Workflow: wf,
+			})
+		}
 	}
 
 	return results, nil
@@ -339,6 +375,38 @@ func (bc *BranchCache) Store(repo string, results map[string]bool) {
 	for branch, exists := range results {
 		bc.cache[repo][branch] = exists
 	}
+}
+
+// JobCache provides thread-safe caching of job details keyed by run ID and updated_at.
+// Avoids redundant API calls when a run's state hasn't changed between polls.
+type JobCache struct {
+	mu    sync.Mutex
+	cache map[int64]jobCacheEntry
+}
+
+type jobCacheEntry struct {
+	updatedAt time.Time
+	jobs      []JobInfo
+}
+
+func NewJobCache() *JobCache {
+	return &JobCache{cache: make(map[int64]jobCacheEntry)}
+}
+
+func (jc *JobCache) Get(runID int64, updatedAt time.Time) ([]JobInfo, bool) {
+	jc.mu.Lock()
+	defer jc.mu.Unlock()
+	entry, ok := jc.cache[runID]
+	if ok && entry.updatedAt.Equal(updatedAt) {
+		return entry.jobs, true
+	}
+	return nil, false
+}
+
+func (jc *JobCache) Set(runID int64, updatedAt time.Time, jobs []JobInfo) {
+	jc.mu.Lock()
+	defer jc.mu.Unlock()
+	jc.cache[runID] = jobCacheEntry{updatedAt: updatedAt, jobs: jobs}
 }
 
 func fetchJobs(repo string, runID int64) ([]Job, error) {

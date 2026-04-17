@@ -43,7 +43,7 @@ var (
 
 const (
 	activeInterval   = 10 * time.Second
-	inactiveInterval = 60 * time.Second
+	inactiveInterval = 180 * time.Second
 	recentThreshold  = 60 * time.Second // run started within this = "active"
 )
 
@@ -60,9 +60,9 @@ type watchState struct {
 
 type tickMsg time.Time
 
-type fetchResultMsg struct {
-	key       watchKey
-	runs      []RunInfo
+type repoFetchResultMsg struct {
+	repo      string
+	results   map[string][]RunInfo // workflow file name -> runs
 	err       error
 	rateLimit bool
 }
@@ -74,23 +74,27 @@ type model struct {
 	err            error
 	rateLimited    bool
 	rateLimitReset time.Time
-	fetching       map[watchKey]bool // prevent overlapping fetches
+	repoFetching   map[string]bool     // prevent overlapping repo-level fetches
+	repoWorkflows  map[string][]string // repo -> watched workflow file names
 	spinnerIndex   int
 	width          int
 	height         int
 	branchCache    *BranchCache
+	jobCache       *JobCache
 	notifyTracker  *NotifyTracker
 }
 
 func newModel(cfg Config) model {
 	watches := make(map[watchKey]*watchState)
 	var order []watchKey
+	repoWorkflows := make(map[string][]string)
 	for _, w := range cfg.Watches {
 		for _, wf := range w.Workflows {
 			key := watchKey{w.Repo, wf}
 			if _, exists := watches[key]; !exists {
 				watches[key] = &watchState{}
 				order = append(order, key)
+				repoWorkflows[w.Repo] = append(repoWorkflows[w.Repo], wf)
 			}
 		}
 	}
@@ -98,19 +102,21 @@ func newModel(cfg Config) model {
 		config:        cfg,
 		watches:       watches,
 		watchOrder:    order,
-		fetching:      make(map[watchKey]bool),
+		repoFetching:  make(map[string]bool),
+		repoWorkflows: repoWorkflows,
 		width:         80,
 		branchCache:   NewBranchCache(),
+		jobCache:      NewJobCache(),
 		notifyTracker: NewNotifyTracker(),
 	}
 }
 
 func (m model) Init() tea.Cmd {
-	// Fetch all on startup in parallel
+	// Fetch all repos on startup in parallel
 	var cmds []tea.Cmd
 	cmds = append(cmds, tickCmd())
-	for key := range m.watches {
-		cmds = append(cmds, fetchCmd(key, m.branchCache))
+	for repo, workflows := range m.repoWorkflows {
+		cmds = append(cmds, repoFetchCmd(repo, workflows, m.branchCache, m.jobCache))
 	}
 	return tea.Batch(cmds...)
 }
@@ -123,10 +129,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "r":
 			var cmds []tea.Cmd
-			for key := range m.watches {
-				if !m.fetching[key] {
-					m.fetching[key] = true
-					cmds = append(cmds, fetchCmd(key, m.branchCache))
+			for repo, workflows := range m.repoWorkflows {
+				if !m.repoFetching[repo] {
+					m.repoFetching[repo] = true
+					cmds = append(cmds, repoFetchCmd(repo, workflows, m.branchCache, m.jobCache))
 				}
 			}
 			return m, tea.Batch(cmds...)
@@ -144,17 +150,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if !m.rateLimited {
 			now := time.Now()
-			for key, state := range m.watches {
-				if m.fetching[key] {
+			for repo, workflows := range m.repoWorkflows {
+				if m.repoFetching[repo] {
 					continue
 				}
+				// Use the most aggressive interval among all workflows in this repo
 				interval := inactiveInterval
-				if state.active {
-					interval = activeInterval
+				needsFetch := false
+				for _, wf := range workflows {
+					state := m.watches[watchKey{repo, wf}]
+					if state.active {
+						interval = activeInterval
+					}
+					if now.Sub(state.lastFetch) >= interval {
+						needsFetch = true
+					}
 				}
-				if now.Sub(state.lastFetch) >= interval {
-					m.fetching[key] = true
-					cmds = append(cmds, fetchCmd(key, m.branchCache))
+				if needsFetch {
+					m.repoFetching[repo] = true
+					cmds = append(cmds, repoFetchCmd(repo, workflows, m.branchCache, m.jobCache))
 				}
 			}
 		}
@@ -164,8 +178,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case rateLimitRetryMsg:
 		return handleRateLimitRetry(m)
 
-	case fetchResultMsg:
-		delete(m.fetching, msg.key)
+	case repoFetchResultMsg:
+		delete(m.repoFetching, msg.repo)
 
 		if msg.rateLimit {
 			m.rateLimited = true
@@ -176,14 +190,27 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.rateLimited = false
 		m.rateLimitReset = time.Time{}
 
-		state := m.watches[msg.key]
 		if msg.err != nil {
 			m.err = msg.err
 		} else {
-			m.notifyTracker.CheckAndNotify(msg.key, msg.runs)
-			state.runs = msg.runs
-			state.lastFetch = time.Now()
-			state.active = isActive(msg.runs)
+			now := time.Now()
+			for wf, runs := range msg.results {
+				key := watchKey{msg.repo, wf}
+				state := m.watches[key]
+				m.notifyTracker.CheckAndNotify(key, runs)
+				state.runs = runs
+				state.lastFetch = now
+				state.active = isActive(runs)
+			}
+			// Mark workflows with no results as fetched (no recent runs)
+			for _, wf := range m.repoWorkflows[msg.repo] {
+				key := watchKey{msg.repo, wf}
+				if _, ok := msg.results[wf]; !ok {
+					state := m.watches[key]
+					state.lastFetch = now
+					state.active = false
+				}
+			}
 			m.err = nil
 		}
 	}
@@ -508,13 +535,13 @@ func tickCmd() tea.Cmd {
 	})
 }
 
-func fetchCmd(key watchKey, bc *BranchCache) tea.Cmd {
+func repoFetchCmd(repo string, workflows []string, bc *BranchCache, jc *JobCache) tea.Cmd {
 	return func() tea.Msg {
-		runs, err := fetchRuns(key.repo, key.workflow, bc)
+		results, err := fetchRepoRuns(repo, workflows, bc, jc)
 		if err != nil && errors.Is(err, errRateLimit) {
-			return fetchResultMsg{key: key, rateLimit: true}
+			return repoFetchResultMsg{repo: repo, rateLimit: true}
 		}
-		return fetchResultMsg{key: key, runs: runs, err: err}
+		return repoFetchResultMsg{repo: repo, results: results, err: err}
 	}
 }
 
@@ -530,14 +557,14 @@ func scheduleRateLimitRetry(resetAt time.Time) tea.Cmd {
 	})
 }
 
-// rateLimitRetryMsg triggers a re-fetch of all watches after rate limit expires.
+// handleRateLimitRetry re-fetches all repos after rate limit expires.
 func handleRateLimitRetry(m model) (model, tea.Cmd) {
 	m.rateLimited = false
 	m.rateLimitReset = time.Time{}
 	var cmds []tea.Cmd
-	for key := range m.watches {
-		m.fetching[key] = true
-		cmds = append(cmds, fetchCmd(key, m.branchCache))
+	for repo, workflows := range m.repoWorkflows {
+		m.repoFetching[repo] = true
+		cmds = append(cmds, repoFetchCmd(repo, workflows, m.branchCache, m.jobCache))
 	}
 	return m, tea.Batch(cmds...)
 }
