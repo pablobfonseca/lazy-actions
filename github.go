@@ -61,6 +61,7 @@ type JobStep struct {
 }
 
 type Job struct {
+	ID         int64     `json:"id"`
 	Name       string    `json:"name"`
 	Status     string    `json:"status"`
 	HTMLURL    string    `json:"html_url"`
@@ -74,11 +75,14 @@ type JobsResponse struct {
 }
 
 type JobInfo struct {
+	ID          int64
 	Name        string
 	Status      string // "in_progress", "queued", "waiting"
 	CurrentStep string
 	URL         string
 	StartedAt   time.Time
+	UpdatedAt   time.Time
+	Conclusion  string
 }
 
 // RunInfo is the combined view of a workflow run with its active/failed jobs.
@@ -363,18 +367,22 @@ func fetchActiveJobs(repo string, runID int64) []JobInfo {
 		switch job.Status {
 		case "waiting", "queued", "pending":
 			result = append(result, JobInfo{
+				ID:        job.ID,
 				Name:      job.Name,
 				Status:    job.Status,
 				URL:       job.HTMLURL,
 				StartedAt: job.StartedAt,
+				UpdatedAt: job.StartedAt,
 			})
 		case "in_progress":
 			result = append(result, JobInfo{
+				ID:          job.ID,
 				Name:        job.Name,
 				Status:      job.Status,
 				CurrentStep: currentStepForJob(job),
 				URL:         job.HTMLURL,
 				StartedAt:   job.StartedAt,
+				UpdatedAt:   job.StartedAt,
 			})
 		case "completed":
 			// Skip completed jobs in an active run
@@ -387,11 +395,13 @@ func fetchActiveJobs(repo string, runID int64) []JobInfo {
 			for j := len(jobs[i].Steps) - 1; j >= 0; j-- {
 				if jobs[i].Steps[j].Status == "completed" {
 					return []JobInfo{{
+						ID:          jobs[i].ID,
 						Name:        jobs[i].Name,
 						Status:      "in_progress",
 						CurrentStep: jobs[i].Steps[j].Name,
 						URL:         jobs[i].HTMLURL,
 						StartedAt:   jobs[i].StartedAt,
+						UpdatedAt:   jobs[i].StartedAt,
 					}}
 				}
 			}
@@ -427,8 +437,12 @@ func fetchFailedJobs(repo string, runID int64) []JobInfo {
 	for _, job := range jobs {
 		if job.Conclusion == "failure" {
 			result = append(result, JobInfo{
-				Name: job.Name,
-				URL:  job.HTMLURL,
+				ID:         job.ID,
+				Name:       job.Name,
+				URL:        job.HTMLURL,
+				StartedAt:  job.StartedAt,
+				UpdatedAt:  job.StartedAt,
+				Conclusion: job.Conclusion,
 			})
 		}
 	}

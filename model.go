@@ -333,9 +333,25 @@ func (m model) fetchLogTailCmd(runID int64) tea.Cmd {
 }
 
 // pickJobForTail returns (jobID, stepName, updatedAt) for the log tail fetch.
-// Stub until Task 12 extends JobInfo with the GitHub job ID.
+// Prefers in-progress jobs; falls back to whichever job is attached
+// (failed jobs in completed runs).
 func pickJobForTail(r RunInfo) (int64, string, time.Time) {
+	for _, j := range r.Jobs {
+		if j.Status == "in_progress" {
+			return j.ID, j.CurrentStep, latestJobUpdatedAt(j)
+		}
+	}
+	for _, j := range r.Jobs {
+		return j.ID, j.CurrentStep, latestJobUpdatedAt(j)
+	}
 	return 0, "", time.Time{}
+}
+
+func latestJobUpdatedAt(j JobInfo) time.Time {
+	if !j.UpdatedAt.IsZero() {
+		return j.UpdatedAt
+	}
+	return j.StartedAt
 }
 
 func scheduleLogTailCmd(runID int64) tea.Cmd {
