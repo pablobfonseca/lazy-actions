@@ -58,3 +58,43 @@ func equalIDs(a, b []int64) bool {
 	}
 	return true
 }
+
+func TestFuzzyFilterMatchesBranch(t *testing.T) {
+	got := applyFilters(fixtureRuns(), filterState{status: statusAll, fuzzy: "main"})
+	want := []int64{2}
+	if !equalIDs(runIDs(got), want) {
+		t.Errorf("fuzzy=main: got %v, want %v", runIDs(got), want)
+	}
+}
+
+func TestFuzzyFilterMatchesRepo(t *testing.T) {
+	got := applyFilters(fixtureRuns(), filterState{status: statusAll, fuzzy: "API"})
+	// case-insensitive across acme/api
+	want := []int64{3, 4}
+	if !equalIDs(runIDs(got), want) {
+		t.Errorf("fuzzy=API: got %v, want %v", runIDs(got), want)
+	}
+}
+
+func TestFuzzyFilterMatchesWorkflow(t *testing.T) {
+	got := applyFilters(fixtureRuns(), filterState{status: statusAll, fuzzy: "deploy"})
+	want := []int64{3}
+	if !equalIDs(runIDs(got), want) {
+		t.Errorf("fuzzy=deploy: got %v, want %v", runIDs(got), want)
+	}
+}
+
+func TestFuzzyFilterCombinesWithStatus(t *testing.T) {
+	got := applyFilters(fixtureRuns(), filterState{status: statusActive, fuzzy: "api"})
+	want := []int64{4}
+	if !equalIDs(runIDs(got), want) {
+		t.Errorf("active+api: got %v, want %v", runIDs(got), want)
+	}
+}
+
+func TestFuzzyFilterEmptyMatchesAll(t *testing.T) {
+	got := applyFilters(fixtureRuns(), filterState{status: statusAll, fuzzy: ""})
+	if len(got) != 4 {
+		t.Errorf("empty fuzzy: got %d, want 4", len(got))
+	}
+}

@@ -1,5 +1,7 @@
 package main
 
+import "strings"
+
 type filterStatus int
 
 const (
@@ -19,6 +21,9 @@ func applyFilters(runs []RunInfo, f filterState) []RunInfo {
 		if !matchStatus(r, f.status) {
 			continue
 		}
+		if !matchFuzzy(r, f.fuzzy) {
+			continue
+		}
 		out = append(out, r)
 	}
 	return out
@@ -33,4 +38,14 @@ func matchStatus(r RunInfo, s filterStatus) bool {
 	default:
 		return true
 	}
+}
+
+func matchFuzzy(r RunInfo, needle string) bool {
+	if needle == "" {
+		return true
+	}
+	n := strings.ToLower(needle)
+	return strings.Contains(strings.ToLower(r.Repo), n) ||
+		strings.Contains(strings.ToLower(r.Workflow), n) ||
+		strings.Contains(strings.ToLower(r.Run.HeadBranch), n)
 }
