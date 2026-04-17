@@ -1,0 +1,42 @@
+package main
+
+import (
+	"testing"
+	"time"
+)
+
+func TestLogCacheHitAndMiss(t *testing.T) {
+	c := NewLogCache()
+	key := logCacheKey{jobID: 1, step: "build", updatedAt: time.Unix(100, 0)}
+	if _, ok := c.Get(key); ok {
+		t.Fatal("expected miss on empty cache")
+	}
+	c.Set(key, []string{"line a", "line b"})
+	got, ok := c.Get(key)
+	if !ok {
+		t.Fatal("expected hit after Set")
+	}
+	if len(got) != 2 || got[0] != "line a" {
+		t.Errorf("got %v, want [line a line b]", got)
+	}
+}
+
+func TestLogCacheInvalidatedByUpdatedAt(t *testing.T) {
+	c := NewLogCache()
+	k1 := logCacheKey{jobID: 1, step: "build", updatedAt: time.Unix(100, 0)}
+	k2 := logCacheKey{jobID: 1, step: "build", updatedAt: time.Unix(200, 0)}
+	c.Set(k1, []string{"old"})
+	if _, ok := c.Get(k2); ok {
+		t.Fatal("different updatedAt must miss")
+	}
+}
+
+func TestLogCacheStepSeparation(t *testing.T) {
+	c := NewLogCache()
+	build := logCacheKey{jobID: 1, step: "build", updatedAt: time.Unix(100, 0)}
+	test := logCacheKey{jobID: 1, step: "test", updatedAt: time.Unix(100, 0)}
+	c.Set(build, []string{"b"})
+	if _, ok := c.Get(test); ok {
+		t.Fatal("different step must miss")
+	}
+}
