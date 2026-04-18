@@ -54,6 +54,11 @@ type repoFetchResultMsg struct {
 	err       error
 	rateLimit bool
 }
+type logViewerLoadedMsg struct {
+	runID int64
+	lines []string
+	err   error
+}
 
 type model struct {
 	config         Config
@@ -68,10 +73,11 @@ type model struct {
 	width          int
 	height         int
 
-	overview *overviewModel
-	detail   *detailModel
-	help     *helpModel
-	confirm  *confirmModel
+	overview  *overviewModel
+	detail    *detailModel
+	help      *helpModel
+	confirm   *confirmModel
+	logviewer *logViewer
 
 	branchCache *BranchCache
 	jobCache    *JobCache
@@ -101,6 +107,7 @@ func newModel(cfg Config) model {
 		detail:        newDetail(),
 		help:          newHelp(),
 		confirm:       newConfirm(),
+		logviewer:     newLogViewer(),
 		branchCache:   NewBranchCache(),
 		jobCache:      NewJobCache(),
 		logCache:      NewLogCache(),
@@ -212,6 +219,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.detail.SetLogTail(msg.step, msg.lines, msg.err)
 		}
 		return m, nil
+
+	case logViewerLoadedMsg:
+		m.logviewer.SetContent(msg.lines, msg.err)
+		return m, nil
 	}
 	return m, nil
 }
@@ -221,6 +232,13 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 
+	if m.mode == modeLogs {
+		cmd, _ := m.logviewer.Update(msg)
+		if !m.logviewer.IsOpen() {
+			m.mode = modeNormal
+		}
+		return m, cmd
+	}
 	if m.help.IsOpen() {
 		switch msg.String() {
 		case "esc", "?", "q":
@@ -257,6 +275,8 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			openURL(r.Run.HTMLURL)
 		}
 		return m, nil
+	case "enter":
+		return m.openLogViewer()
 	}
 
 	prev := m.overview.SelectedID()
@@ -270,6 +290,25 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m model) openLogViewer() (tea.Model, tea.Cmd) {
+	r, ok := m.overview.Selected()
+	if !ok {
+		return m, nil
+	}
+	job, _, _ := pickJobForTail(r)
+	if job == 0 {
+		return m, nil
+	}
+	m.logviewer.Open(fmt.Sprintf("%s/%s #%d", r.Repo, r.Workflow, r.Run.ID), m.width, m.height-2)
+	m.mode = modeLogs
+	repo := r.Repo
+	runID := r.Run.ID
+	return m, func() tea.Msg {
+		lines, err := fetchJobLogs(repo, job)
+		return logViewerLoadedMsg{runID: runID, lines: lines, err: err}
+	}
+}
+
 func (m model) View() string {
 	header := titleStyle.Render("  GitHub Actions Monitor")
 	if m.rateLimited {
@@ -280,6 +319,9 @@ func (m model) View() string {
 		header += "  " + failureStyle.Render(fmt.Sprintf("error: %s", m.err))
 	}
 
+	if m.mode == modeLogs {
+		return m.logviewer.View(m.width, m.height)
+	}
 	if m.help.IsOpen() {
 		return m.help.View(m.width, m.height)
 	}
