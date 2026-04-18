@@ -239,4 +239,3 @@ func lineIconAndStyle(r gh.RunInfo, spinnerIndex int) (string, lipgloss.Style) {
 		return "?", dimStyle
 	}
 }
-
