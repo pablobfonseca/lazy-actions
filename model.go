@@ -399,7 +399,10 @@ func (m model) View() string {
 	right := lipgloss.NewStyle().Width(detailWidth(m.width)).Render(detail)
 	body := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 
-	status := dimStyle.Render("  j/k move  enter logs  r refresh  ? help  q quit")
+	status := dimStyle.Render("  j/k move  enter logs  r refresh  a/f/A filter  / search  ? help  q quit")
+	if m.mode == modeFilter {
+		status = "  " + m.filterInput.View()
+	}
 
 	return header + "\n" + body + "\n" + status
 }
