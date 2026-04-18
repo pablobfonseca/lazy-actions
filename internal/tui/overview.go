@@ -1,4 +1,4 @@
-package main
+package tui
 
 import (
 	"fmt"
@@ -8,10 +8,12 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/jdelia/gh-action-monitor/internal/gh"
 )
 
 type overviewModel struct {
-	runs      []RunInfo // full, unfiltered
+	runs      []gh.RunInfo // full, unfiltered
 	filter    filterState
 	cursorID  int64 // selected run by ID (stable across updates)
 	width     int
@@ -24,7 +26,7 @@ func newOverview() *overviewModel {
 }
 
 // SetRuns replaces the backing run list, preserving the cursor by ID when possible.
-func (o *overviewModel) SetRuns(runs []RunInfo) {
+func (o *overviewModel) SetRuns(runs []gh.RunInfo) {
 	o.runs = runs
 	o.refreshOwnerSameness()
 	visible := o.visibleRuns()
@@ -51,13 +53,13 @@ func (o *overviewModel) SetSize(width int) { o.width = width }
 
 func (o *overviewModel) SelectedID() int64 { return o.cursorID }
 
-func (o *overviewModel) Selected() (RunInfo, bool) {
+func (o *overviewModel) Selected() (gh.RunInfo, bool) {
 	for _, r := range o.visibleRuns() {
 		if r.Run.ID == o.cursorID {
 			return r, true
 		}
 	}
-	return RunInfo{}, false
+	return gh.RunInfo{}, false
 }
 
 func (o *overviewModel) MoveCursor(delta int) {
@@ -98,7 +100,7 @@ func (o *overviewModel) moveToIndex(idx int) {
 }
 
 // visibleRuns applies filters and sorts Active→Recent, most-recent-first within each group.
-func (o *overviewModel) visibleRuns() []RunInfo {
+func (o *overviewModel) visibleRuns() []gh.RunInfo {
 	filtered := applyFilters(o.runs, o.filter)
 	active, recent := splitActiveRecent(filtered)
 	sort.SliceStable(active, func(i, j int) bool {
@@ -110,7 +112,7 @@ func (o *overviewModel) visibleRuns() []RunInfo {
 	return append(active, recent...)
 }
 
-func splitActiveRecent(runs []RunInfo) (active, recent []RunInfo) {
+func splitActiveRecent(runs []gh.RunInfo) (active, recent []gh.RunInfo) {
 	for _, r := range runs {
 		if r.Run.Status == "in_progress" || r.Run.Status == "waiting" ||
 			time.Since(r.Run.RunStartedAt) < recentThreshold {
@@ -199,7 +201,7 @@ func (o *overviewModel) View(spinnerIndex int) string {
 	return b.String()
 }
 
-func (o *overviewModel) renderLine(r RunInfo, spinnerIndex int) string {
+func (o *overviewModel) renderLine(r gh.RunInfo, spinnerIndex int) string {
 	selected := r.Run.ID == o.cursorID
 	icon, style := lineIconAndStyle(r, spinnerIndex)
 	var elapsed string
@@ -223,7 +225,7 @@ func (o *overviewModel) renderLine(r RunInfo, spinnerIndex int) string {
 	return prefix + line
 }
 
-func lineIconAndStyle(r RunInfo, spinnerIndex int) (string, lipgloss.Style) {
+func lineIconAndStyle(r gh.RunInfo, spinnerIndex int) (string, lipgloss.Style) {
 	switch {
 	case r.Run.Status == "in_progress", r.Run.Status == "waiting":
 		return spinnerFrames[spinnerIndex], runningStyle

@@ -5,16 +5,19 @@ import (
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/jdelia/gh-action-monitor/internal/config"
+	"github.com/jdelia/gh-action-monitor/internal/tui"
 )
 
 func main() {
-	cfg, err := loadConfig()
+	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 		os.Exit(1)
 	}
 
-	p := tea.NewProgram(newModel(cfg), tea.WithAltScreen())
+	p := tea.NewProgram(tui.New(cfg), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 		os.Exit(1)

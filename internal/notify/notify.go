@@ -1,14 +1,16 @@
-package main
+package notify
 
 import (
 	"fmt"
 	"os/exec"
 	"sync"
+
+	"github.com/jdelia/gh-action-monitor/internal/gh"
 )
 
 type runState struct {
-	status     string // "in_progress", "waiting", "completed"
-	conclusion string // "", "success", "failure", "cancelled"
+	status     string
+	conclusion string
 }
 
 type notification struct {
@@ -21,22 +23,23 @@ type notification struct {
 type NotifyTracker struct {
 	mu          sync.Mutex
 	states      map[int64]runState // run ID -> last known state
-	initialized map[watchKey]bool  // skip notifications on first fetch per watch
+	initialized map[string]bool    // "repo/workflow" -> has seen first fetch
 }
 
 func NewNotifyTracker() *NotifyTracker {
 	return &NotifyTracker{
 		states:      make(map[int64]runState),
-		initialized: make(map[watchKey]bool),
+		initialized: make(map[string]bool),
 	}
 }
 
 // CheckAndNotify compares new runs against tracked state and sends notifications.
 // Returns immediately; notifications are sent asynchronously.
-func (nt *NotifyTracker) CheckAndNotify(key watchKey, runs []RunInfo) {
+func (nt *NotifyTracker) CheckAndNotify(repo, workflow string, runs []gh.RunInfo) {
 	nt.mu.Lock()
 	defer nt.mu.Unlock()
 
+	key := repo + "/" + workflow
 	firstFetch := !nt.initialized[key]
 	nt.initialized[key] = true
 
@@ -62,26 +65,13 @@ func (nt *NotifyTracker) CheckAndNotify(key watchKey, runs []RunInfo) {
 
 		switch {
 		case newState.status == "in_progress" && (!tracked || prev.status != "in_progress"):
-			go sendNotification(notification{
-				title:   "▶ Started",
-				message: label,
-			})
+			go sendNotification(notification{title: "▶ Started", message: label})
 		case newState.status == "completed" && newState.conclusion == "success":
-			go sendNotification(notification{
-				title:   "✓ Passed",
-				message: label,
-			})
+			go sendNotification(notification{title: "✓ Passed", message: label})
 		case newState.status == "completed" && newState.conclusion == "failure":
-			go sendNotification(notification{
-				title:   "✗ Failed",
-				message: label,
-				sound:   true,
-			})
+			go sendNotification(notification{title: "✗ Failed", message: label, sound: true})
 		case newState.status == "completed" && newState.conclusion == "cancelled":
-			go sendNotification(notification{
-				title:   "⊘ Cancelled",
-				message: label,
-			})
+			go sendNotification(notification{title: "⊘ Cancelled", message: label})
 		}
 	}
 }
@@ -91,6 +81,5 @@ func sendNotification(n notification) {
 	if n.sound {
 		script += ` sound name "Basso"`
 	}
-	// Errors are intentionally ignored — notifications are best-effort
 	exec.Command("osascript", "-e", script).Run()
 }

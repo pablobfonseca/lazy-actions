@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"fmt"
@@ -17,7 +17,7 @@ type Config struct {
 	Watches []WatchEntry `yaml:"watches"`
 }
 
-func loadConfig() (Config, error) {
+func Load() (Config, error) {
 	paths := []string{
 		"config.yaml",
 		filepath.Join(os.Getenv("HOME"), ".config", "gh-action-monitor", "config.yaml"),

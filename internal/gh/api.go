@@ -1,4 +1,4 @@
-package main
+package gh
 
 import (
 	"encoding/json"
@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-var errRateLimit = errors.New("GitHub API rate limit exceeded")
+var ErrRateLimit = errors.New("GitHub API rate limit exceeded")
 
 type RateLimitResponse struct {
 	Resources struct {
@@ -21,8 +21,8 @@ type RateLimitResponse struct {
 	} `json:"resources"`
 }
 
-// fetchRateLimitReset returns the time when the rate limit resets.
-func fetchRateLimitReset() time.Time {
+// FetchRateLimitReset returns the time when the rate limit resets.
+func FetchRateLimitReset() time.Time {
 	// rate_limit endpoint itself doesn't count against the limit
 	cmd := exec.Command("gh", "api", "rate_limit")
 	out, err := cmd.Output()
@@ -100,7 +100,7 @@ func ghAPI(endpoint string) ([]byte, error) {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			stderr := string(exitErr.Stderr)
 			if strings.Contains(stderr, "rate limit") || strings.Contains(stderr, "403") {
-				return nil, fmt.Errorf("%w: %s", errRateLimit, endpoint)
+				return nil, fmt.Errorf("%w: %s", ErrRateLimit, endpoint)
 			}
 			return nil, fmt.Errorf("gh api %s: %s", endpoint, stderr)
 		}
@@ -109,9 +109,9 @@ func ghAPI(endpoint string) ([]byte, error) {
 	return out, nil
 }
 
-// fetchRepoRuns fetches all runs for a repo in 3 API calls (in_progress, waiting, completed)
+// FetchRepoRuns fetches all runs for a repo in 3 API calls (in_progress, waiting, completed)
 // instead of 3 calls per workflow. Results are filtered to watched workflows by path.
-func fetchRepoRuns(repo string, workflows []string, branchCache *BranchCache, jobCache *JobCache) (map[string][]RunInfo, error) {
+func FetchRepoRuns(repo string, workflows []string, branchCache *BranchCache, jobCache *JobCache) (map[string][]RunInfo, error) {
 	// Map workflow file paths to config names for filtering
 	watchedPaths := make(map[string]string, len(workflows))
 	for _, wf := range workflows {
@@ -275,7 +275,7 @@ func ghGraphQL(query string) ([]byte, error) {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			stderr := string(exitErr.Stderr)
 			if strings.Contains(stderr, "rate limit") || strings.Contains(stderr, "403") {
-				return nil, fmt.Errorf("%w: graphql", errRateLimit)
+				return nil, fmt.Errorf("%w: graphql", ErrRateLimit)
 			}
 			return nil, fmt.Errorf("gh api graphql: %s", stderr)
 		}

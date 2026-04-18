@@ -1,16 +1,18 @@
-package main
+package tui
 
 import (
 	"testing"
 	"time"
+
+	"github.com/jdelia/gh-action-monitor/internal/gh"
 )
 
-func fixtureRuns() []RunInfo {
-	return []RunInfo{
-		{Repo: "acme/web", Workflow: "ci.yml", Run: WorkflowRun{ID: 1, Status: "in_progress", HeadBranch: "feat/login"}},
-		{Repo: "acme/web", Workflow: "ci.yml", Run: WorkflowRun{ID: 2, Status: "completed", Conclusion: "success", HeadBranch: "main"}},
-		{Repo: "acme/api", Workflow: "deploy.yml", Run: WorkflowRun{ID: 3, Status: "completed", Conclusion: "failure", HeadBranch: "fix/x", RunStartedAt: time.Now()}},
-		{Repo: "acme/api", Workflow: "ci.yml", Run: WorkflowRun{ID: 4, Status: "waiting", HeadBranch: "feat/big"}},
+func fixtureRuns() []gh.RunInfo {
+	return []gh.RunInfo{
+		{Repo: "acme/web", Workflow: "ci.yml", Run: gh.WorkflowRun{ID: 1, Status: "in_progress", HeadBranch: "feat/login"}},
+		{Repo: "acme/web", Workflow: "ci.yml", Run: gh.WorkflowRun{ID: 2, Status: "completed", Conclusion: "success", HeadBranch: "main"}},
+		{Repo: "acme/api", Workflow: "deploy.yml", Run: gh.WorkflowRun{ID: 3, Status: "completed", Conclusion: "failure", HeadBranch: "fix/x", RunStartedAt: time.Now()}},
+		{Repo: "acme/api", Workflow: "ci.yml", Run: gh.WorkflowRun{ID: 4, Status: "waiting", HeadBranch: "feat/big"}},
 	}
 }
 
@@ -39,7 +41,7 @@ func TestStatusFilterAll(t *testing.T) {
 	}
 }
 
-func runIDs(runs []RunInfo) []int64 {
+func runIDs(runs []gh.RunInfo) []int64 {
 	out := make([]int64, len(runs))
 	for i, r := range runs {
 		out[i] = r.Run.ID

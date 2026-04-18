@@ -1,6 +1,10 @@
-package main
+package tui
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/jdelia/gh-action-monitor/internal/gh"
+)
 
 type filterStatus int
 
@@ -15,8 +19,8 @@ type filterState struct {
 	fuzzy  string // Task 5 uses this
 }
 
-func applyFilters(runs []RunInfo, f filterState) []RunInfo {
-	out := make([]RunInfo, 0, len(runs))
+func applyFilters(runs []gh.RunInfo, f filterState) []gh.RunInfo {
+	out := make([]gh.RunInfo, 0, len(runs))
 	for _, r := range runs {
 		if !matchStatus(r, f.status) {
 			continue
@@ -29,7 +33,7 @@ func applyFilters(runs []RunInfo, f filterState) []RunInfo {
 	return out
 }
 
-func matchStatus(r RunInfo, s filterStatus) bool {
+func matchStatus(r gh.RunInfo, s filterStatus) bool {
 	switch s {
 	case statusActive:
 		return r.Run.Status == "in_progress" || r.Run.Status == "waiting"
@@ -40,7 +44,7 @@ func matchStatus(r RunInfo, s filterStatus) bool {
 	}
 }
 
-func matchFuzzy(r RunInfo, needle string) bool {
+func matchFuzzy(r gh.RunInfo, needle string) bool {
 	if needle == "" {
 		return true
 	}

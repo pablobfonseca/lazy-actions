@@ -1,4 +1,4 @@
-package main
+package tui
 
 import (
 	"fmt"
@@ -6,10 +6,12 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/jdelia/gh-action-monitor/internal/gh"
 )
 
 type detailModel struct {
-	run         *RunInfo // nil if nothing selected
+	run         *gh.RunInfo // nil if nothing selected
 	logTail     []string
 	logTailErr  error
 	logTailStep string // for the header
@@ -18,7 +20,7 @@ type detailModel struct {
 
 func newDetail() *detailModel { return &detailModel{} }
 
-func (d *detailModel) SetRun(r *RunInfo) {
+func (d *detailModel) SetRun(r *gh.RunInfo) {
 	d.run = r
 	d.logTail = nil
 	d.logTailErr = nil

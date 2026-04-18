@@ -1,4 +1,4 @@
-package main
+package tui
 
 import (
 	"errors"
@@ -9,6 +9,10 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/jdelia/gh-action-monitor/internal/config"
+	"github.com/jdelia/gh-action-monitor/internal/gh"
+	"github.com/jdelia/gh-action-monitor/internal/notify"
 )
 
 type mode int
@@ -35,7 +39,7 @@ type watchKey struct {
 }
 
 type watchState struct {
-	runs      []RunInfo
+	runs      []gh.RunInfo
 	lastFetch time.Time
 	active    bool
 }
@@ -51,7 +55,7 @@ type logTailResultMsg struct {
 }
 type repoFetchResultMsg struct {
 	repo      string
-	results   map[string][]RunInfo
+	results   map[string][]gh.RunInfo
 	err       error
 	rateLimit bool
 }
@@ -62,7 +66,7 @@ type logViewerLoadedMsg struct {
 }
 
 type model struct {
-	config         Config
+	config         config.Config
 	mode           mode
 	watches        map[watchKey]*watchState
 	repoWorkflows  map[string][]string
@@ -83,14 +87,14 @@ type model struct {
 	confirm   *confirmModel
 	logviewer *logViewer
 
-	branchCache *BranchCache
-	jobCache    *JobCache
-	logCache    *LogCache
+	branchCache *gh.BranchCache
+	jobCache    *gh.JobCache
+	logCache    *gh.LogCache
 
-	notifyTracker *NotifyTracker
+	notifyTracker *notify.NotifyTracker
 }
 
-func newModel(cfg Config) model {
+func New(cfg config.Config) tea.Model {
 	watches := make(map[watchKey]*watchState)
 	repoWorkflows := make(map[string][]string)
 	for _, w := range cfg.Watches {
@@ -117,10 +121,10 @@ func newModel(cfg Config) model {
 		help:          newHelp(),
 		confirm:       newConfirm(),
 		logviewer:     newLogViewer(),
-		branchCache:   NewBranchCache(),
-		jobCache:      NewJobCache(),
-		logCache:      NewLogCache(),
-		notifyTracker: NewNotifyTracker(),
+		branchCache:   gh.NewBranchCache(),
+		jobCache:      gh.NewJobCache(),
+		logCache:      gh.NewLogCache(),
+		notifyTracker: notify.NewNotifyTracker(),
 		width:         80,
 	}
 }
@@ -187,7 +191,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		delete(m.repoFetching, msg.repo)
 		if msg.rateLimit {
 			m.rateLimited = true
-			m.rateLimitReset = fetchRateLimitReset()
+			m.rateLimitReset = gh.FetchRateLimitReset()
 			return m, scheduleRateLimitRetry(m.rateLimitReset)
 		}
 		m.rateLimited = false
@@ -198,7 +202,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			for wf, runs := range msg.results {
 				key := watchKey{msg.repo, wf}
 				st := m.watches[key]
-				m.notifyTracker.CheckAndNotify(key, runs)
+				m.notifyTracker.CheckAndNotify(msg.repo, wf, runs)
 				st.runs = runs
 				st.lastFetch = now
 				st.active = isActive(runs)
@@ -367,7 +371,7 @@ func (m model) openLogViewer() (tea.Model, tea.Cmd) {
 	repo := r.Repo
 	runID := r.Run.ID
 	return m, func() tea.Msg {
-		lines, err := fetchJobLogs(repo, job)
+		lines, err := gh.FetchJobLogs(repo, job)
 		return logViewerLoadedMsg{runID: runID, lines: lines, err: err}
 	}
 }
@@ -416,8 +420,8 @@ func (m model) View() string {
 	return header + "\n" + body + "\n" + status
 }
 
-func (m *model) allRuns() []RunInfo {
-	var out []RunInfo
+func (m *model) allRuns() []gh.RunInfo {
+	var out []gh.RunInfo
 	for _, st := range m.watches {
 		out = append(out, st.runs...)
 	}
@@ -444,7 +448,7 @@ func (m model) fetchLogTailCmd(runID int64) tea.Cmd {
 	repo := r.Repo
 	cache := m.logCache
 	return func() tea.Msg {
-		lines, err := fetchLogTail(cache, repo, job, step, updatedAt, logTailLines)
+		lines, err := gh.FetchLogTail(cache, repo, job, step, updatedAt, logTailLines)
 		return logTailResultMsg{runID: runID, step: step, lines: lines, err: err}
 	}
 }
@@ -452,7 +456,7 @@ func (m model) fetchLogTailCmd(runID int64) tea.Cmd {
 // pickJobForTail returns (jobID, stepName, updatedAt) for the log tail fetch.
 // Prefers in-progress jobs; falls back to whichever job is attached
 // (failed jobs in completed runs).
-func pickJobForTail(r RunInfo) (int64, string, time.Time) {
+func pickJobForTail(r gh.RunInfo) (int64, string, time.Time) {
 	for _, j := range r.Jobs {
 		if j.Status == "in_progress" {
 			return j.ID, j.CurrentStep, latestJobUpdatedAt(j)
@@ -464,7 +468,7 @@ func pickJobForTail(r RunInfo) (int64, string, time.Time) {
 	return 0, "", time.Time{}
 }
 
-func latestJobUpdatedAt(j JobInfo) time.Time {
+func latestJobUpdatedAt(j gh.JobInfo) time.Time {
 	if !j.UpdatedAt.IsZero() {
 		return j.UpdatedAt
 	}
@@ -495,7 +499,7 @@ func openURL(url string) {
 	_ = exec.Command("open", url).Start()
 }
 
-func isActive(runs []RunInfo) bool {
+func isActive(runs []gh.RunInfo) bool {
 	for _, r := range runs {
 		if r.Run.Status == "in_progress" || r.Run.Status == "waiting" {
 			return true
@@ -507,7 +511,7 @@ func isActive(runs []RunInfo) bool {
 	return false
 }
 
-func renderJobLine(job JobInfo, _ int) string {
+func renderJobLine(job gh.JobInfo, _ int) string {
 	switch job.Status {
 	case "waiting", "queued", "pending":
 		return waitingStyle.Render(fmt.Sprintf("%s  %s", job.Name, job.Status))
@@ -544,10 +548,10 @@ func tickCmd() tea.Cmd {
 	return tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg { return tickMsg(t) })
 }
 
-func repoFetchCmd(repo string, wfs []string, bc *BranchCache, jc *JobCache) tea.Cmd {
+func repoFetchCmd(repo string, wfs []string, bc *gh.BranchCache, jc *gh.JobCache) tea.Cmd {
 	return func() tea.Msg {
-		results, err := fetchRepoRuns(repo, wfs, bc, jc)
-		if err != nil && errors.Is(err, errRateLimit) {
+		results, err := gh.FetchRepoRuns(repo, wfs, bc, jc)
+		if err != nil && errors.Is(err, gh.ErrRateLimit) {
 			return repoFetchResultMsg{repo: repo, rateLimit: true}
 		}
 		return repoFetchResultMsg{repo: repo, results: results, err: err}
