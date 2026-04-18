@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"time"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -73,6 +74,9 @@ type model struct {
 	width          int
 	height         int
 
+	filter      filterState
+	filterInput textinput.Model
+
 	overview  *overviewModel
 	detail    *detailModel
 	help      *helpModel
@@ -98,11 +102,16 @@ func newModel(cfg Config) model {
 			}
 		}
 	}
+	ti := textinput.New()
+	ti.Placeholder = "filter (branch/workflow/repo)…"
+	ti.CharLimit = 64
 	return model{
 		config:        cfg,
 		watches:       watches,
 		repoWorkflows: repoWorkflows,
 		repoFetching:  make(map[string]bool),
+		filter:        filterState{status: statusAll},
+		filterInput:   ti,
 		overview:      newOverview(),
 		detail:        newDetail(),
 		help:          newHelp(),
@@ -232,6 +241,32 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 
+	if m.mode == modeFilter {
+		switch msg.String() {
+		case "enter":
+			m.filter.fuzzy = m.filterInput.Value()
+			m.overview.SetFilter(m.filter)
+			m.syncDetailSelection()
+			m.filterInput.Blur()
+			m.mode = modeNormal
+			return m, nil
+		case "esc":
+			m.filter.fuzzy = ""
+			m.overview.SetFilter(m.filter)
+			m.syncDetailSelection()
+			m.filterInput.Blur()
+			m.filterInput.SetValue("")
+			m.mode = modeNormal
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.filterInput, cmd = m.filterInput.Update(msg)
+		m.filter.fuzzy = m.filterInput.Value()
+		m.overview.SetFilter(m.filter)
+		m.syncDetailSelection()
+		return m, cmd
+	}
+
 	if m.mode == modeLogs {
 		cmd, _ := m.logviewer.Update(msg)
 		if !m.logviewer.IsOpen() {
@@ -277,6 +312,34 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "enter":
 		return m.openLogViewer()
+	case "a":
+		m.filter.status = statusActive
+		m.overview.SetFilter(m.filter)
+		m.syncDetailSelection()
+		return m, nil
+	case "f":
+		m.filter.status = statusFailed
+		m.overview.SetFilter(m.filter)
+		m.syncDetailSelection()
+		return m, nil
+	case "A":
+		m.filter = filterState{status: statusAll}
+		m.overview.SetFilter(m.filter)
+		m.syncDetailSelection()
+		return m, nil
+	case "/":
+		m.mode = modeFilter
+		m.filterInput.Focus()
+		m.filterInput.SetValue(m.filter.fuzzy)
+		return m, nil
+	case "esc":
+		if m.filter.fuzzy != "" || m.filter.status != statusAll {
+			m.filter = filterState{status: statusAll}
+			m.filterInput.SetValue("")
+			m.overview.SetFilter(m.filter)
+			m.syncDetailSelection()
+		}
+		return m, nil
 	}
 
 	prev := m.overview.SelectedID()
