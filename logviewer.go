@@ -58,7 +58,11 @@ func (v *logViewer) SetContent(lines []string, err error) {
 	v.loading = false
 	v.err = err
 	v.lines = lines
-	v.rendered = strings.Join(lines, "\n")
+	colored := make([]string, len(lines))
+	for i, ln := range lines {
+		colored[i] = colorizeLogLine(ln)
+	}
+	v.rendered = strings.Join(colored, "\n")
 	v.vp.SetContent(v.rendered)
 	v.vp.GotoBottom()
 }

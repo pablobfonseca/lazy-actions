@@ -86,7 +86,7 @@ func (d *detailModel) View() string {
 		} else {
 			for _, line := range d.logTail {
 				b.WriteString("  ")
-				b.WriteString(line)
+				b.WriteString(colorizeLogLine(line))
 				b.WriteString("\n")
 			}
 		}

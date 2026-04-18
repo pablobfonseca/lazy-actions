@@ -395,8 +395,17 @@ func (m model) View() string {
 	overview := m.overview.View(m.spinnerIndex)
 	detail := m.detail.View()
 
-	left := lipgloss.NewStyle().Width(overviewWidth(m.width)).Render(overview)
-	right := lipgloss.NewStyle().Width(detailWidth(m.width)).Render(detail)
+	leftInner := overviewWidth(m.width) - 4 // borders + padding
+	rightInner := detailWidth(m.width) - 4
+	if leftInner < 10 {
+		leftInner = 10
+	}
+	if rightInner < 10 {
+		rightInner = 10
+	}
+
+	left := activePaneBorder.Width(leftInner).Render(overview)
+	right := paneBorderStyle.Width(rightInner).Render(detail)
 	body := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 
 	status := dimStyle.Render("  j/k move  enter logs  r refresh  a/f/A filter  / search  ? help  q quit")

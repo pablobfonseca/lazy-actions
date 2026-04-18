@@ -215,10 +215,12 @@ func (o *overviewModel) renderLine(r RunInfo, spinnerIndex int) string {
 		r.Workflow,
 		branchStyle.Render(r.Run.HeadBranch),
 	)
+	prefix := "  "
 	if selected {
+		prefix = selectedBarStyle.Render("▎ ")
 		line = selectedRowStyle.Render(line)
 	}
-	return "  " + line
+	return prefix + line
 }
 
 func lineIconAndStyle(r RunInfo, spinnerIndex int) (string, lipgloss.Style) {
@@ -236,6 +238,3 @@ func lineIconAndStyle(r RunInfo, spinnerIndex int) (string, lipgloss.Style) {
 	}
 }
 
-var selectedRowStyle = lipgloss.NewStyle().
-	Background(lipgloss.Color("237")).
-	Foreground(lipgloss.Color("231"))
