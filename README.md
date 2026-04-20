@@ -9,8 +9,9 @@ Watch every workflow you care about in a single pane of glass: running jobs with
 - **At-a-glance overview** of every watched workflow run across every repo, grouped `Active` / `Recent`, sorted by recency.
 - **Passive detail pane** follows the cursor: metadata, jobs, and the last ~10 lines of the active-or-failed step.
 - **Fullscreen log viewer** (`enter`) with `/` search, `n/N` navigation, and colorized GitHub Actions output (`##[warning]`, `##[error]`, `##[group]`, etc.).
+- **Actions**: re-run failed jobs (`F`), cancel (`x`), download artifacts (`d`), copy URL (`y`) / SHA (`Y`).
 - **Filters**: status (`a`/`f`/`A`) and fuzzy text (`/` over repo/workflow/branch).
-- **Macros polling**: adaptive 10 s when anything is active, 180 s when idle. Rate-limit aware.
+- **Adaptive polling**: 10 s while anything is running (or finished in the last 60 s), 180 s when idle. Rate-limit aware. `r` forces an immediate refresh; successful `F`/`x` auto-refresh the affected repo.
 - **macOS notifications** on run state transitions (started / passed / failed / cancelled).
 
 ## Prerequisites
@@ -58,6 +59,10 @@ Workflow names are the file names under `.github/workflows/` in each repo.
 | `enter`        | normal      | Open fullscreen log viewer              |
 | `o`            | normal      | Open run URL in browser                 |
 | `r`            | normal      | Refresh all repos now                   |
+| `F`            | normal      | Re-run failed jobs (confirm)            |
+| `x`            | normal      | Cancel run (confirm)                    |
+| `d`            | normal      | Download artifacts (prompts for path)   |
+| `y` / `Y`      | normal      | Copy run URL / commit SHA               |
 | `a` / `f` / `A`| normal      | Filter: active / failed / all           |
 | `/`            | normal      | Fuzzy filter prompt                     |
 | `esc`          | normal      | Clear filter                            |
@@ -82,7 +87,8 @@ make help       # list available targets
 main.go
 internal/
 ├── config/     YAML config loading
-├── gh/         GitHub API client + caches
+├── gh/         GitHub API client + caches (reads in api.go, writes in actions.go)
+├── clip/       pbcopy wrapper
 ├── notify/     macOS notifications
 └── tui/        Bubble Tea components
     ├── model.go                    root model + mode routing
@@ -90,6 +96,7 @@ internal/
     ├── detail.go                   metadata + jobs + log tail
     ├── logviewer.go                fullscreen logs + search
     ├── help.go / confirm.go        modals
+    ├── prompt.go                   inline one-line prompt
     ├── filter.go / filter_test     status + fuzzy matching
     ├── colorize.go                 log line coloring
     ├── keys.go                     centralized keymap
@@ -100,5 +107,4 @@ Built on [Bubble Tea](https://github.com/charmbracelet/bubbletea), [Lipgloss](ht
 
 ## Roadmap
 
-- **Phase 2** — Actions: rerun (with confirmation), cancel, download artifacts, copy URL/SHA.
 - **Phase 3** — Local dry-runs via [`act`](https://github.com/nektos/act).

@@ -26,6 +26,11 @@ var keyMap = []keySection{
 			{Keys: []string{"enter"}, Desc: "open log viewer"},
 			{Keys: []string{"o"}, Desc: "open in browser"},
 			{Keys: []string{"r"}, Desc: "refresh now"},
+			{Keys: []string{"F"}, Desc: "re-run failed jobs"},
+			{Keys: []string{"x"}, Desc: "cancel run"},
+			{Keys: []string{"d"}, Desc: "download artifacts"},
+			{Keys: []string{"y"}, Desc: "copy run URL"},
+			{Keys: []string{"Y"}, Desc: "copy commit SHA"},
 		},
 	},
 	{

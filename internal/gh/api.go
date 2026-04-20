@@ -42,6 +42,7 @@ type WorkflowRun struct {
 	Status       string    `json:"status"`
 	Conclusion   string    `json:"conclusion"`
 	HeadBranch   string    `json:"head_branch"`
+	HeadSHA      string    `json:"head_sha"`
 	RunStartedAt time.Time `json:"run_started_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 	HTMLURL      string    `json:"html_url"`

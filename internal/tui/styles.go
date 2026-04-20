@@ -72,6 +72,10 @@ var (
 	logErrorStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
 	logNoticeStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
 	logDebugStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+
+	toastSuccessStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Bold(true)
+	toastErrorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
+	toastInfoStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true)
 )
 
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}

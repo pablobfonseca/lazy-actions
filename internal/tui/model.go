@@ -4,12 +4,14 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/upscopeio/lazy-actions/internal/clip"
 	"github.com/upscopeio/lazy-actions/internal/config"
 	"github.com/upscopeio/lazy-actions/internal/gh"
 	"github.com/upscopeio/lazy-actions/internal/notify"
@@ -31,7 +33,22 @@ const (
 	recentThreshold  = 60 * time.Second
 	logTailSettle    = 300 * time.Millisecond
 	logTailLines     = 10
+	toastTTL         = 3 * time.Second
 )
+
+type toastLevel int
+
+const (
+	toastInfo toastLevel = iota
+	toastSuccess
+	toastError
+)
+
+type toast struct {
+	text    string
+	level   toastLevel
+	expires time.Time
+}
 
 type watchKey struct {
 	repo     string
@@ -52,6 +69,24 @@ type logTailResultMsg struct {
 	step  string
 	lines []string
 	err   error
+}
+
+type actionKind int
+
+const (
+	actionRerunFailed actionKind = iota
+	actionCancel
+)
+
+type actionResultMsg struct {
+	kind actionKind
+	repo string
+	err  error
+}
+
+type downloadResultMsg struct {
+	dest string
+	err  error
 }
 type repoFetchResultMsg struct {
 	repo      string
@@ -85,6 +120,7 @@ type model struct {
 	detail    *detailModel
 	help      *helpModel
 	confirm   *confirmModel
+	prompt    *promptModel
 	logviewer *logViewer
 
 	branchCache *gh.BranchCache
@@ -92,6 +128,8 @@ type model struct {
 	logCache    *gh.LogCache
 
 	notifyTracker *notify.NotifyTracker
+
+	toast *toast
 }
 
 func New(cfg config.Config) tea.Model {
@@ -120,6 +158,7 @@ func New(cfg config.Config) tea.Model {
 		detail:        newDetail(),
 		help:          newHelp(),
 		confirm:       newConfirm(),
+		prompt:        newPrompt(),
 		logviewer:     newLogViewer(),
 		branchCache:   gh.NewBranchCache(),
 		jobCache:      gh.NewJobCache(),
@@ -236,8 +275,46 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case logViewerLoadedMsg:
 		m.logviewer.SetContent(msg.lines, msg.err)
 		return m, nil
+
+	case actionResultMsg:
+		m.setToast(toastForActionResult(msg))
+		if msg.err == nil && !m.repoFetching[msg.repo] {
+			m.repoFetching[msg.repo] = true
+			return m, repoFetchCmd(msg.repo, m.repoWorkflows[msg.repo], m.branchCache, m.jobCache)
+		}
+		return m, nil
+
+	case downloadResultMsg:
+		if msg.err != nil {
+			m.setToast(toastError, msg.err.Error())
+		} else {
+			m.setToast(toastSuccess, "saved to "+msg.dest)
+		}
+		return m, nil
 	}
 	return m, nil
+}
+
+func toastForActionResult(msg actionResultMsg) (toastLevel, string) {
+	if msg.err != nil {
+		switch {
+		case errors.Is(msg.err, gh.ErrRateLimit):
+			return toastError, "rate limited"
+		case errors.Is(msg.err, gh.ErrNotRerunnable):
+			return toastError, "nothing to re-run"
+		case errors.Is(msg.err, gh.ErrNotCancellable):
+			return toastError, "run cannot be cancelled"
+		default:
+			return toastError, "action failed"
+		}
+	}
+	switch msg.kind {
+	case actionRerunFailed:
+		return toastSuccess, "re-run queued"
+	case actionCancel:
+		return toastSuccess, "cancel requested"
+	}
+	return toastInfo, ""
 }
 
 func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -293,6 +370,14 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	if m.prompt.IsOpen() {
+		handled, cmd := m.prompt.Update(msg)
+		if handled {
+			m.prompt.Close()
+			return m, cmd
+		}
+		return m, cmd
+	}
 
 	switch msg.String() {
 	case "q":
@@ -313,6 +398,72 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if r, ok := m.overview.Selected(); ok && r.Run.HTMLURL != "" {
 			openURL(r.Run.HTMLURL)
 		}
+		return m, nil
+	case "y":
+		if r, ok := m.overview.Selected(); ok && r.Run.HTMLURL != "" {
+			if err := clip.Copy(r.Run.HTMLURL); err != nil {
+				m.setToast(toastError, "copy failed")
+			} else {
+				m.setToast(toastSuccess, "copied run URL")
+			}
+		}
+		return m, nil
+	case "Y":
+		if r, ok := m.overview.Selected(); ok && r.Run.HeadSHA != "" {
+			if err := clip.Copy(r.Run.HeadSHA); err != nil {
+				m.setToast(toastError, "copy failed")
+			} else {
+				short := r.Run.HeadSHA
+				if len(short) > 7 {
+					short = short[:7]
+				}
+				m.setToast(toastSuccess, "copied SHA "+short)
+			}
+		}
+		return m, nil
+	case "F":
+		r, ok := m.overview.Selected()
+		if !ok {
+			return m, nil
+		}
+		if !isRerunnable(r.Run) {
+			m.setToast(toastError, "nothing to re-run")
+			return m, nil
+		}
+		m.confirm.Open(
+			fmt.Sprintf("Re-run failed jobs for %s/%s #%d on %s?", r.Repo, r.Workflow, r.Run.ID, r.Run.HeadBranch),
+			rerunFailedCmd(r.Repo, r.Run.ID),
+		)
+		return m, nil
+	case "x":
+		r, ok := m.overview.Selected()
+		if !ok {
+			return m, nil
+		}
+		if !isCancellable(r.Run) {
+			m.setToast(toastError, "run cannot be cancelled")
+			return m, nil
+		}
+		m.confirm.Open(
+			fmt.Sprintf("Cancel %s/%s #%d on %s?", r.Repo, r.Workflow, r.Run.ID, r.Run.HeadBranch),
+			cancelRunCmd(r.Repo, r.Run.ID),
+		)
+		return m, nil
+	case "d":
+		r, ok := m.overview.Selected()
+		if !ok {
+			return m, nil
+		}
+		if r.Run.Status != "completed" {
+			m.setToast(toastError, "artifacts available only for completed runs")
+			return m, nil
+		}
+		dest := defaultArtifactDir(r.Repo, r.Run.ID)
+		repo := r.Repo
+		runID := r.Run.ID
+		m.prompt.Open("download to:", dest, func(chosen string) tea.Cmd {
+			return downloadArtifactsCmd(repo, runID, chosen)
+		})
 		return m, nil
 	case "enter":
 		return m.openLogViewer()
@@ -416,8 +567,29 @@ func (m model) View() string {
 	if m.mode == modeFilter {
 		status = "  " + m.filterInput.View()
 	}
+	if m.prompt.IsOpen() {
+		status = m.prompt.View()
+	}
+	if m.toast != nil && time.Now().Before(m.toast.expires) {
+		status = "  " + renderToast(*m.toast)
+	}
 
 	return header + "\n" + body + "\n" + status
+}
+
+func renderToast(t toast) string {
+	switch t.level {
+	case toastSuccess:
+		return toastSuccessStyle.Render(t.text)
+	case toastError:
+		return toastErrorStyle.Render(t.text)
+	default:
+		return toastInfoStyle.Render(t.text)
+	}
+}
+
+func (m *model) setToast(level toastLevel, text string) {
+	m.toast = &toast{text: text, level: level, expires: time.Now().Add(toastTTL)}
 }
 
 func (m *model) allRuns() []gh.RunInfo {
@@ -497,6 +669,54 @@ func detailWidth(w int) int {
 
 func openURL(url string) {
 	_ = exec.Command("open", url).Start()
+}
+
+// isRerunnable returns true for terminal, non-successful runs. GitHub will
+// reject rerun on in-progress runs; this is a client-side pre-check so we can
+// surface a friendlier toast than the raw API error.
+func isRerunnable(run gh.WorkflowRun) bool {
+	if run.Status != "completed" {
+		return false
+	}
+	switch run.Conclusion {
+	case "failure", "cancelled", "timed_out", "startup_failure":
+		return true
+	}
+	return false
+}
+
+func isCancellable(run gh.WorkflowRun) bool {
+	switch run.Status {
+	case "in_progress", "queued", "waiting", "pending", "requested":
+		return true
+	}
+	return false
+}
+
+func rerunFailedCmd(repo string, runID int64) tea.Cmd {
+	return func() tea.Msg {
+		return actionResultMsg{kind: actionRerunFailed, repo: repo, err: gh.RerunFailedJobs(repo, runID)}
+	}
+}
+
+func cancelRunCmd(repo string, runID int64) tea.Cmd {
+	return func() tea.Msg {
+		return actionResultMsg{kind: actionCancel, repo: repo, err: gh.CancelRun(repo, runID)}
+	}
+}
+
+// defaultArtifactDir builds a predictable, sibling-friendly path.
+// Slashes in "org/repo" are replaced with "-" so it stays a single directory.
+func defaultArtifactDir(repo string, runID int64) string {
+	safe := strings.ReplaceAll(repo, "/", "-")
+	return fmt.Sprintf("./artifacts/%s-%d", safe, runID)
+}
+
+func downloadArtifactsCmd(repo string, runID int64, dest string) tea.Cmd {
+	return func() tea.Msg {
+		path, err := gh.DownloadArtifacts(repo, runID, dest)
+		return downloadResultMsg{dest: path, err: err}
+	}
 }
 
 func isActive(runs []gh.RunInfo) bool {
