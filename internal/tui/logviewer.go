@@ -47,8 +47,15 @@ func (v *logViewer) Open(title string, width, height int) {
 	v.matches = nil
 	v.matchIndex = 0
 	v.searching = false
+	if width < 1 {
+		width = 1
+	}
+	vpHeight := height - 3
+	if vpHeight < 1 {
+		vpHeight = 1
+	}
 	v.vp.Width = width
-	v.vp.Height = height - 3
+	v.vp.Height = vpHeight
 	v.vp.SetContent("")
 }
 
@@ -142,6 +149,11 @@ func (v *logViewer) jumpToMatch(delta int) {
 	v.vp.SetYOffset(line)
 }
 
+// renderWithHighlights keeps ANSI colorization on every line and paints the
+// search hit on top. Segments on either side of the hit are re-colorized so
+// timestamps and `##[level]` styling survive across the match boundary. A
+// match that lands mid-prefix may lose style on the short trailing segment,
+// but this is strictly better than dropping color across the entire view.
 func (v *logViewer) renderWithHighlights() string {
 	if v.query == "" {
 		return v.rendered
@@ -152,13 +164,13 @@ func (v *logViewer) renderWithHighlights() string {
 		lower := strings.ToLower(ln)
 		idx := strings.Index(lower, q)
 		if idx == -1 {
-			b.WriteString(ln)
+			b.WriteString(colorizeLogLine(ln))
 			b.WriteString("\n")
 			continue
 		}
-		b.WriteString(ln[:idx])
+		b.WriteString(colorizeLogLine(ln[:idx]))
 		b.WriteString(searchMatchStyle.Render(ln[idx : idx+len(v.query)]))
-		b.WriteString(ln[idx+len(v.query):])
+		b.WriteString(colorizeLogLine(ln[idx+len(v.query):]))
 		b.WriteString("\n")
 	}
 	return strings.TrimRight(b.String(), "\n")

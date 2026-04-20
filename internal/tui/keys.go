@@ -49,7 +49,7 @@ var keyMap = []keySection{
 			{Keys: []string{"/"}, Desc: "search"},
 			{Keys: []string{"n"}, Desc: "next match"},
 			{Keys: []string{"N"}, Desc: "previous match"},
-			{Keys: []string{"g", "gg"}, Desc: "top"},
+			{Keys: []string{"g"}, Desc: "top"},
 			{Keys: []string{"G"}, Desc: "bottom"},
 			{Keys: []string{"esc"}, Desc: "close"},
 		},

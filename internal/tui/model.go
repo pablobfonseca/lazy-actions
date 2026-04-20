@@ -257,6 +257,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = nil
 			m.overview.SetRuns(m.allRuns())
 			m.syncDetailSelection()
+			if id := m.overview.SelectedID(); id != 0 {
+				return m, scheduleLogTailCmd(id)
+			}
 		}
 		return m, nil
 
@@ -531,7 +534,11 @@ func (m model) View() string {
 	header := titleStyle.Render("  GitHub Actions Monitor")
 	if m.rateLimited {
 		remaining := time.Until(m.rateLimitReset)
-		header += runningStyle.Render(fmt.Sprintf("  [rate limited, resets in %s]", formatDuration(remaining)))
+		if remaining > 0 {
+			header += runningStyle.Render(fmt.Sprintf("  [rate limited, resets in %s]", formatDuration(remaining)))
+		} else {
+			header += runningStyle.Render("  [rate limited, retrying…]")
+		}
 	}
 	if m.err != nil {
 		header += "  " + failureStyle.Render(fmt.Sprintf("error: %s", m.err))
@@ -548,20 +555,23 @@ func (m model) View() string {
 	}
 
 	overview := m.overview.View(m.spinnerIndex)
-	detail := m.detail.View()
-
 	leftInner := overviewWidth(m.width) - 4 // borders + padding
-	rightInner := detailWidth(m.width) - 4
 	if leftInner < 10 {
 		leftInner = 10
 	}
-	if rightInner < 10 {
-		rightInner = 10
-	}
-
 	left := activePaneBorder.Width(leftInner).Render(overview)
-	right := paneBorderStyle.Width(rightInner).Render(detail)
-	body := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+
+	var body string
+	if detailWidth(m.width) == 0 {
+		body = left
+	} else {
+		rightInner := detailWidth(m.width) - 4
+		if rightInner < 10 {
+			rightInner = 10
+		}
+		right := paneBorderStyle.Width(rightInner).Render(m.detail.View())
+		body = lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+	}
 
 	status := dimStyle.Render("  j/k move  enter logs  r refresh  a/f/A filter  / search  ? help  q quit")
 	if m.mode == modeFilter {
@@ -620,7 +630,7 @@ func (m model) fetchLogTailCmd(runID int64) tea.Cmd {
 	repo := r.Repo
 	cache := m.logCache
 	return func() tea.Msg {
-		lines, err := gh.FetchLogTail(cache, repo, job, step, updatedAt, logTailLines)
+		lines, err := gh.FetchLogTail(cache, repo, job, updatedAt, logTailLines)
 		return logTailResultMsg{runID: runID, step: step, lines: lines, err: err}
 	}
 }

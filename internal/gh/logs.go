@@ -8,9 +8,10 @@ import (
 	"time"
 )
 
+// logCacheKey keys on the job and its updatedAt — the stored value is the
+// full job log, so the current step name isn't relevant to identity.
 type logCacheKey struct {
 	jobID     int64
-	step      string
 	updatedAt time.Time
 }
 
@@ -49,8 +50,8 @@ func FetchJobLogs(repo string, jobID int64) ([]string, error) {
 
 // FetchLogTail returns at most n trailing lines of the given job's logs.
 // Uses the cache; on miss, calls FetchJobLogs and caches the full result.
-func FetchLogTail(c *LogCache, repo string, jobID int64, step string, updatedAt time.Time, n int) ([]string, error) {
-	key := logCacheKey{jobID: jobID, step: step, updatedAt: updatedAt}
+func FetchLogTail(c *LogCache, repo string, jobID int64, updatedAt time.Time, n int) ([]string, error) {
+	key := logCacheKey{jobID: jobID, updatedAt: updatedAt}
 	if lines, ok := c.Get(key); ok {
 		return tailN(lines, n), nil
 	}

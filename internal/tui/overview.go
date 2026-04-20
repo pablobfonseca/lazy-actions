@@ -101,15 +101,23 @@ func (o *overviewModel) moveToIndex(idx int) {
 
 // visibleRuns applies filters and sorts Active→Recent, most-recent-first within each group.
 func (o *overviewModel) visibleRuns() []gh.RunInfo {
+	active, recent := o.visibleSections()
+	return append(active, recent...)
+}
+
+// visibleSections returns the same runs as visibleRuns but pre-split into the
+// two sections View() renders. Kept separate so View() doesn't re-run the
+// filter and sort logic twice per render.
+func (o *overviewModel) visibleSections() (active, recent []gh.RunInfo) {
 	filtered := applyFilters(o.runs, o.filter)
-	active, recent := splitActiveRecent(filtered)
+	active, recent = splitActiveRecent(filtered)
 	sort.SliceStable(active, func(i, j int) bool {
 		return active[i].Run.RunStartedAt.After(active[j].Run.RunStartedAt)
 	})
 	sort.SliceStable(recent, func(i, j int) bool {
 		return recent[i].Run.RunStartedAt.After(recent[j].Run.RunStartedAt)
 	})
-	return append(active, recent...)
+	return active, recent
 }
 
 func splitActiveRecent(runs []gh.RunInfo) (active, recent []gh.RunInfo) {
@@ -167,13 +175,7 @@ func (o *overviewModel) Update(msg tea.KeyMsg) (*overviewModel, tea.Cmd) {
 }
 
 func (o *overviewModel) View(spinnerIndex int) string {
-	active, recent := splitActiveRecent(applyFilters(o.runs, o.filter))
-	sort.SliceStable(active, func(i, j int) bool {
-		return active[i].Run.RunStartedAt.After(active[j].Run.RunStartedAt)
-	})
-	sort.SliceStable(recent, func(i, j int) bool {
-		return recent[i].Run.RunStartedAt.After(recent[j].Run.RunStartedAt)
-	})
+	active, recent := o.visibleSections()
 
 	var b strings.Builder
 	if len(active) > 0 {

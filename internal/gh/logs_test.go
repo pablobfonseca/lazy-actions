@@ -7,7 +7,7 @@ import (
 
 func TestLogCacheHitAndMiss(t *testing.T) {
 	c := NewLogCache()
-	key := logCacheKey{jobID: 1, step: "build", updatedAt: time.Unix(100, 0)}
+	key := logCacheKey{jobID: 1, updatedAt: time.Unix(100, 0)}
 	if _, ok := c.Get(key); ok {
 		t.Fatal("expected miss on empty cache")
 	}
@@ -23,20 +23,29 @@ func TestLogCacheHitAndMiss(t *testing.T) {
 
 func TestLogCacheInvalidatedByUpdatedAt(t *testing.T) {
 	c := NewLogCache()
-	k1 := logCacheKey{jobID: 1, step: "build", updatedAt: time.Unix(100, 0)}
-	k2 := logCacheKey{jobID: 1, step: "build", updatedAt: time.Unix(200, 0)}
+	k1 := logCacheKey{jobID: 1, updatedAt: time.Unix(100, 0)}
+	k2 := logCacheKey{jobID: 1, updatedAt: time.Unix(200, 0)}
 	c.Set(k1, []string{"old"})
 	if _, ok := c.Get(k2); ok {
 		t.Fatal("different updatedAt must miss")
 	}
 }
 
-func TestLogCacheStepSeparation(t *testing.T) {
+func TestLogCacheSharedAcrossSteps(t *testing.T) {
 	c := NewLogCache()
-	build := logCacheKey{jobID: 1, step: "build", updatedAt: time.Unix(100, 0)}
-	test := logCacheKey{jobID: 1, step: "test", updatedAt: time.Unix(100, 0)}
-	c.Set(build, []string{"b"})
-	if _, ok := c.Get(test); ok {
-		t.Fatal("different step must miss")
+	key := logCacheKey{jobID: 1, updatedAt: time.Unix(100, 0)}
+	c.Set(key, []string{"full job log"})
+	if _, ok := c.Get(key); !ok {
+		t.Fatal("same job/updatedAt must hit regardless of current step")
+	}
+}
+
+func TestLogCacheJobSeparation(t *testing.T) {
+	c := NewLogCache()
+	k1 := logCacheKey{jobID: 1, updatedAt: time.Unix(100, 0)}
+	k2 := logCacheKey{jobID: 2, updatedAt: time.Unix(100, 0)}
+	c.Set(k1, []string{"job 1"})
+	if _, ok := c.Get(k2); ok {
+		t.Fatal("different job must miss")
 	}
 }
