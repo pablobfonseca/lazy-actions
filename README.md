@@ -26,7 +26,7 @@ Watch every workflow you care about in a single pane of glass: running jobs with
 ## Install
 
 ```sh
-go install github.com/jdelia/gh-action-monitor@latest
+go install github.com/upscopeio/lazy-actions@latest
 # or from a checkout:
 make build      # produces ./bin/lazy-actions
 make install    # to $GOBIN
@@ -34,7 +34,7 @@ make install    # to $GOBIN
 
 ## Configuration
 
-Create `config.yaml` in the current directory or at `~/.config/gh-action-monitor/config.yaml`:
+Create `config.yaml` in the current directory or at `~/.config/lazy-actions/config.yaml`:
 
 ```yaml
 watches:

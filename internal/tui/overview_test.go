@@ -3,7 +3,7 @@ package tui
 import (
 	"testing"
 
-	"github.com/jdelia/gh-action-monitor/internal/gh"
+	"github.com/upscopeio/lazy-actions/internal/gh"
 )
 
 func TestOverviewCursorStableAfterInsert(t *testing.T) {

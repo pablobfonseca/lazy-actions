@@ -6,8 +6,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/jdelia/gh-action-monitor/internal/config"
-	"github.com/jdelia/gh-action-monitor/internal/tui"
+	"github.com/upscopeio/lazy-actions/internal/config"
+	"github.com/upscopeio/lazy-actions/internal/tui"
 )
 
 func main() {

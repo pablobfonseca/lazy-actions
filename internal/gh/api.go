@@ -448,4 +448,3 @@ func fetchFailedJobs(repo string, runID int64) []JobInfo {
 	}
 	return result
 }
-

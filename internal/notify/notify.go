@@ -5,7 +5,7 @@ import (
 	"os/exec"
 	"sync"
 
-	"github.com/jdelia/gh-action-monitor/internal/gh"
+	"github.com/upscopeio/lazy-actions/internal/gh"
 )
 
 type runState struct {

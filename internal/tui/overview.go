@@ -9,7 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/jdelia/gh-action-monitor/internal/gh"
+	"github.com/upscopeio/lazy-actions/internal/gh"
 )
 
 type overviewModel struct {

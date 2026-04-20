@@ -10,9 +10,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/jdelia/gh-action-monitor/internal/config"
-	"github.com/jdelia/gh-action-monitor/internal/gh"
-	"github.com/jdelia/gh-action-monitor/internal/notify"
+	"github.com/upscopeio/lazy-actions/internal/config"
+	"github.com/upscopeio/lazy-actions/internal/gh"
+	"github.com/upscopeio/lazy-actions/internal/notify"
 )
 
 type mode int

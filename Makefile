@@ -8,7 +8,7 @@ build:
 	@mkdir -p $(BIN_DIR)
 	go build -o $(BIN_DIR)/$(BINARY) .
 
-## run: run against ./config.yaml (or ~/.config/gh-action-monitor/config.yaml)
+## run: run against ./config.yaml (or ~/.config/lazy-actions/config.yaml)
 run:
 	go run .
 

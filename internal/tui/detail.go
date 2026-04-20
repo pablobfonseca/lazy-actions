@@ -7,7 +7,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/jdelia/gh-action-monitor/internal/gh"
+	"github.com/upscopeio/lazy-actions/internal/gh"
 )
 
 type detailModel struct {

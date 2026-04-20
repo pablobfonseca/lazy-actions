@@ -10,7 +10,7 @@ type helpModel struct {
 	open bool
 }
 
-func newHelp() *helpModel        { return &helpModel{} }
+func newHelp() *helpModel         { return &helpModel{} }
 func (h *helpModel) Toggle()      { h.open = !h.open }
 func (h *helpModel) Close()       { h.open = false }
 func (h *helpModel) IsOpen() bool { return h.open }

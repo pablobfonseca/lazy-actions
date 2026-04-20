@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jdelia/gh-action-monitor/internal/gh"
+	"github.com/upscopeio/lazy-actions/internal/gh"
 )
 
 func fixtureRuns() []gh.RunInfo {
