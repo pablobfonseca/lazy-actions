@@ -174,7 +174,7 @@ func (o *overviewModel) Update(msg tea.KeyMsg) (*overviewModel, tea.Cmd) {
 	return o, nil
 }
 
-func (o *overviewModel) View(spinnerIndex int) string {
+func (o *overviewModel) View(spinnerIndex int, initialLoading bool) string {
 	active, recent := o.visibleSections()
 
 	var b strings.Builder
@@ -198,7 +198,14 @@ func (o *overviewModel) View(spinnerIndex int) string {
 		}
 	}
 	if len(active) == 0 && len(recent) == 0 {
-		b.WriteString(dimStyle.Render("  no runs"))
+		if initialLoading {
+			b.WriteString("  ")
+			b.WriteString(runningStyle.Render(spinnerFrames[spinnerIndex]))
+			b.WriteString(" ")
+			b.WriteString(waitingStyle.Render("Loading actions…"))
+		} else {
+			b.WriteString(dimStyle.Render("  no runs"))
+		}
 	}
 	return b.String()
 }

@@ -530,8 +530,38 @@ func (m model) openLogViewer() (tea.Model, tea.Cmd) {
 	}
 }
 
+// isInitialLoading reports whether we're in the cold-start window where at
+// least one watch has never returned and no runs are visible yet. Used to
+// decide between showing a spinner placeholder or "no runs".
+func (m model) isInitialLoading() bool {
+	if len(m.allRuns()) > 0 {
+		return false
+	}
+	for _, st := range m.watches {
+		if st.lastFetch.IsZero() {
+			return true
+		}
+	}
+	return false
+}
+
+// isRefreshing reports whether any repo fetch is currently in flight. Used
+// for a subtle header indicator during background refreshes (distinct from
+// initial loading, which replaces the entire overview body).
+func (m model) isRefreshing() bool {
+	for _, fetching := range m.repoFetching {
+		if fetching {
+			return true
+		}
+	}
+	return false
+}
+
 func (m model) View() string {
 	header := titleStyle.Render("  GitHub Actions Monitor")
+	if m.isRefreshing() && !m.isInitialLoading() {
+		header += "  " + runningStyle.Render(spinnerFrames[m.spinnerIndex])
+	}
 	if m.rateLimited {
 		remaining := time.Until(m.rateLimitReset)
 		if remaining > 0 {
@@ -554,7 +584,7 @@ func (m model) View() string {
 		return m.confirm.View(m.width)
 	}
 
-	overview := m.overview.View(m.spinnerIndex)
+	overview := m.overview.View(m.spinnerIndex, m.isInitialLoading())
 	leftInner := overviewWidth(m.width) - 4 // borders + padding
 	if leftInner < 10 {
 		leftInner = 10
