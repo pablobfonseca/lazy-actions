@@ -9,6 +9,8 @@ import (
 const (
 	groupPrefix    = "##[group]"
 	endGroupPrefix = "##[endgroup]"
+	errorPrefix    = "##[error]"
+	warningPrefix  = "##[warning]"
 	groupIndent    = "  "
 )
 
@@ -16,10 +18,12 @@ const (
 // (header == ""). Orphan runs are coalesced so the user navigates between
 // meaningful blocks, not individual lines.
 type logSection struct {
-	header string   // raw header line, e.g. "2026-...Z ##[group]Setup node". Empty for orphan run.
-	title  string   // the group name stripped of timestamp + "##[group]" prefix. Empty for orphan.
-	lines  []string // content lines (excludes the header and ##[endgroup]).
-	closed bool     // true if this group ended with an explicit ##[endgroup]. Groups only.
+	header     string   // raw header line, e.g. "2026-...Z ##[group]Setup node". Empty for orphan run.
+	title      string   // the group name stripped of timestamp + "##[group]" prefix. Empty for orphan.
+	lines      []string // content lines (excludes the header and ##[endgroup]).
+	closed     bool     // true if this group ended with an explicit ##[endgroup]. Groups only.
+	hasError   bool     // true if any body line starts with ##[error]
+	hasWarning bool     // true if any body line starts with ##[warning]
 }
 
 func (s logSection) isGroup() bool { return s.header != "" }
@@ -36,7 +40,8 @@ func parseLogSections(lines []string) []logSection {
 		if len(orphan) == 0 {
 			return
 		}
-		sections = append(sections, logSection{lines: orphan})
+		hasErr, hasWarn := scanSeverity(orphan)
+		sections = append(sections, logSection{lines: orphan, hasError: hasErr, hasWarning: hasWarn})
 		orphan = nil
 	}
 
@@ -59,7 +64,11 @@ func parseLogSections(lines []string) []logSection {
 				j++
 			}
 			closed := j < len(lines)
-			sections = append(sections, logSection{header: ln, title: title, lines: body, closed: closed})
+			hasErr, hasWarn := scanSeverity(body)
+			sections = append(sections, logSection{
+				header: ln, title: title, lines: body, closed: closed,
+				hasError: hasErr, hasWarning: hasWarn,
+			})
 			if closed {
 				i = j + 1
 			} else {
@@ -82,6 +91,25 @@ func stripTimestamp(line string) string {
 		return line[i:]
 	}
 	return line
+}
+
+// scanSeverity reports whether any line carries an ##[error] or ##[warning]
+// prefix (after the timestamp is stripped). Used to flag sections so they
+// can auto-expand and show a badge.
+func scanSeverity(lines []string) (hasError, hasWarning bool) {
+	for _, ln := range lines {
+		rest := stripTimestamp(ln)
+		switch {
+		case strings.HasPrefix(rest, errorPrefix):
+			hasError = true
+		case strings.HasPrefix(rest, warningPrefix):
+			hasWarning = true
+		}
+		if hasError && hasWarning {
+			return
+		}
+	}
+	return
 }
 
 // sectionLineCount counts how many content lines a section has.
@@ -130,7 +158,8 @@ func renderSections(
 		}
 
 		folded := collapsed[i] && !forceExpand[i]
-		emit(renderGroupHeader(sec, folded, current == i), i)
+		matchCount := countMatches(sec, query)
+		emit(renderGroupHeader(sec, folded, current == i, matchCount), i)
 		if folded {
 			continue
 		}
@@ -142,7 +171,23 @@ func renderSections(
 	return strings.TrimRight(b.String(), "\n"), sectionStarts, lineToSection
 }
 
-func renderGroupHeader(sec logSection, folded, selected bool) string {
+// countMatches returns the number of body lines in sec that contain query
+// (case-insensitive). Returns 0 when query is empty.
+func countMatches(sec logSection, query string) int {
+	if query == "" {
+		return 0
+	}
+	q := strings.ToLower(query)
+	n := 0
+	for _, ln := range sec.lines {
+		if strings.Contains(strings.ToLower(ln), q) {
+			n++
+		}
+	}
+	return n
+}
+
+func renderGroupHeader(sec logSection, folded, selected bool, matchCount int) string {
 	icon := "▼"
 	if folded {
 		icon = "▶"
@@ -151,16 +196,37 @@ func renderGroupHeader(sec logSection, folded, selected bool) string {
 	if title == "" {
 		title = "(group)"
 	}
-	meta := ""
+
+	var parts []string
 	if folded {
 		n := sectionLineCount(sec)
 		unit := "lines"
 		if n == 1 {
 			unit = "line"
 		}
-		meta = dimStyle.Render(" (" + itoa(n) + " " + unit + ")")
+		parts = append(parts, itoa(n)+" "+unit)
 	}
-	head := logGroupHeaderStyle.Render(icon + " " + title)
+	if matchCount > 0 {
+		unit := "matches"
+		if matchCount == 1 {
+			unit = "match"
+		}
+		parts = append(parts, itoa(matchCount)+" "+unit)
+	}
+	meta := ""
+	if len(parts) > 0 {
+		meta = dimStyle.Render(" (" + strings.Join(parts, " · ") + ")")
+	}
+
+	badge := ""
+	switch {
+	case sec.hasError:
+		badge = " " + logErrorStyle.Render("✗")
+	case sec.hasWarning:
+		badge = " " + logWarningStyle.Render("⚠")
+	}
+
+	head := logGroupHeaderStyle.Render(icon+" "+title) + badge
 	if selected {
 		return logGroupSelectedStyle.Render("▸ ") + head + meta
 	}

@@ -86,6 +86,69 @@ func TestSectionForRawLine(t *testing.T) {
 	}
 }
 
+func TestParseLogSections_FlagsErrorsAndWarnings(t *testing.T) {
+	lines := []string{
+		ts + "##[group]Build",
+		ts + "compiling…",
+		ts + "##[warning]deprecated API",
+		ts + "##[endgroup]",
+		ts + "##[group]Test",
+		ts + "##[error]assertion failed",
+		ts + "##[endgroup]",
+		ts + "##[group]Upload",
+		ts + "done",
+		ts + "##[endgroup]",
+	}
+	got := parseLogSections(lines)
+	if len(got) != 3 {
+		t.Fatalf("want 3 sections, got %d", len(got))
+	}
+	if !got[0].hasWarning || got[0].hasError {
+		t.Errorf("Build section: want warn-only, got err=%v warn=%v", got[0].hasError, got[0].hasWarning)
+	}
+	if !got[1].hasError || got[1].hasWarning {
+		t.Errorf("Test section: want error-only, got err=%v warn=%v", got[1].hasError, got[1].hasWarning)
+	}
+	if got[2].hasError || got[2].hasWarning {
+		t.Errorf("Upload section: want clean, got err=%v warn=%v", got[2].hasError, got[2].hasWarning)
+	}
+}
+
+func TestFirstErrorOrGroupIndex_PrefersErrorGroup(t *testing.T) {
+	sections := []logSection{
+		{lines: []string{"orphan"}},                                // 0: orphan
+		{header: "h", title: "Setup", lines: []string{"ok"}},       // 1: clean group
+		{header: "h", title: "Build", lines: []string{"err"}, hasError: true}, // 2: error group
+		{header: "h", title: "Upload", lines: []string{"ok"}},      // 3: clean group
+	}
+	if got := firstErrorOrGroupIndex(sections); got != 2 {
+		t.Errorf("want 2 (error group), got %d", got)
+	}
+}
+
+func TestFirstErrorOrGroupIndex_FallsBackToFirstGroup(t *testing.T) {
+	sections := []logSection{
+		{lines: []string{"orphan"}},
+		{header: "h", title: "Setup", lines: []string{"ok"}},
+	}
+	if got := firstErrorOrGroupIndex(sections); got != 1 {
+		t.Errorf("want 1 (first group), got %d", got)
+	}
+}
+
+func TestCountMatches(t *testing.T) {
+	sec := logSection{lines: []string{"hello world", "HELLO again", "nothing"}}
+	if n := countMatches(sec, ""); n != 0 {
+		t.Errorf("empty query: want 0, got %d", n)
+	}
+	if n := countMatches(sec, "hello"); n != 2 {
+		t.Errorf("case-insensitive: want 2, got %d", n)
+	}
+	if n := countMatches(sec, "missing"); n != 0 {
+		t.Errorf("no hits: want 0, got %d", n)
+	}
+}
+
 func TestSectionForRawLine_OutOfRange(t *testing.T) {
 	sections := parseLogSections([]string{ts + "only line"})
 	if got := sectionForRawLine(sections, 99); got != -1 {

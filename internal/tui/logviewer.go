@@ -77,15 +77,22 @@ func (v *logViewer) SetContent(lines []string, err error) {
 	v.lines = lines
 	v.sections = parseLogSections(lines)
 	v.collapsed = map[int]bool{}
+	// Collapse every group by default, except ones containing errors — if a
+	// user opens logs it's almost always to find a failure, so put the user
+	// on the error with as few keystrokes as possible.
 	for i, sec := range v.sections {
-		if sec.isGroup() {
+		if sec.isGroup() && !sec.hasError {
 			v.collapsed[i] = true
 		}
 	}
 	v.forceExpand = map[int]bool{}
-	v.current = firstGroupIndex(v.sections)
+	v.current = firstErrorOrGroupIndex(v.sections)
 	v.rerender()
-	v.vp.GotoTop()
+	if v.current >= 0 && v.current < len(v.sectionStarts) {
+		v.scrollToSection(v.current)
+	} else {
+		v.vp.GotoTop()
+	}
 }
 
 // Update returns (cmd, consumed). When consumed is true the caller should not
@@ -266,6 +273,18 @@ func firstGroupIndex(sections []logSection) int {
 		}
 	}
 	return 0
+}
+
+// firstErrorOrGroupIndex prefers the first group that contains an error, so
+// opening a failing run lands the cursor directly on the problem. Falls back
+// to the first group of any kind when no errors exist.
+func firstErrorOrGroupIndex(sections []logSection) int {
+	for i, s := range sections {
+		if s.isGroup() && s.hasError {
+			return i
+		}
+	}
+	return firstGroupIndex(sections)
 }
 
 func (v *logViewer) computeMatches() {
