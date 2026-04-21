@@ -134,11 +134,6 @@ func (v *logViewer) Update(msg tea.KeyMsg) (tea.Cmd, bool) {
 	case " ", "enter":
 		v.toggleCurrent()
 		return nil, true
-	case "z":
-		// 'zR' expand all, 'zM' collapse all — consume 'z' alone and let the
-		// next key decide. Simpler: support single-key 'Z' for expand, 'X' for
-		// collapse. But vim muscle memory is worth keeping, so map directly.
-		return nil, true
 	case "Z":
 		v.expandAll()
 		return nil, true
@@ -305,21 +300,22 @@ func (v *logViewer) jumpToMatch(delta int) {
 }
 
 // sectionForRawLine maps an index into the flat input `lines` slice back to
-// the section that contains it.
+// the section that contains it. Group sections span their header line, body
+// lines, and (if closed) the trailing ##[endgroup] line.
 func sectionForRawLine(sections []logSection, rawIdx int) int {
 	cursor := 0
 	for i, s := range sections {
 		span := len(s.lines)
 		if s.isGroup() {
-			span++ // account for the header line
+			span++ // header line
+			if s.closed {
+				span++ // ##[endgroup] line
+			}
 		}
 		if rawIdx >= cursor && rawIdx < cursor+span {
 			return i
 		}
 		cursor += span
-		if s.isGroup() {
-			cursor++ // account for the ##[endgroup] line
-		}
 	}
 	return -1
 }

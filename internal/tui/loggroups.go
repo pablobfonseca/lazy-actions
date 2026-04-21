@@ -19,12 +19,16 @@ type logSection struct {
 	header string   // raw header line, e.g. "2026-...Z ##[group]Setup node". Empty for orphan run.
 	title  string   // the group name stripped of timestamp + "##[group]" prefix. Empty for orphan.
 	lines  []string // content lines (excludes the header and ##[endgroup]).
+	closed bool     // true if this group ended with an explicit ##[endgroup]. Groups only.
 }
 
 func (s logSection) isGroup() bool { return s.header != "" }
 
 // parseLogSections walks raw log lines and groups them by ##[group]/##[endgroup].
-// Unclosed groups at end-of-input are terminated implicitly.
+// Unclosed groups at end-of-input are terminated implicitly. Nested groups are
+// not supported: GitHub Actions does not emit them, and an inner ##[group]
+// within a group's body is treated as ordinary content until the first
+// ##[endgroup] closes the outer group.
 func parseLogSections(lines []string) []logSection {
 	var sections []logSection
 	var orphan []string
@@ -54,9 +58,9 @@ func parseLogSections(lines []string) []logSection {
 				body = append(body, lines[j])
 				j++
 			}
-			sections = append(sections, logSection{header: ln, title: title, lines: body})
-			// Skip past ##[endgroup] if present.
-			if j < len(lines) {
+			closed := j < len(lines)
+			sections = append(sections, logSection{header: ln, title: title, lines: body, closed: closed})
+			if closed {
 				i = j + 1
 			} else {
 				i = j

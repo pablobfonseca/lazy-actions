@@ -46,6 +46,11 @@ var keyMap = []keySection{
 	{
 		Title: "Log viewer",
 		Bindings: []keyBinding{
+			{Keys: []string{"tab"}, Desc: "next group"},
+			{Keys: []string{"shift+tab"}, Desc: "previous group"},
+			{Keys: []string{"space", "enter"}, Desc: "fold/unfold group"},
+			{Keys: []string{"Z"}, Desc: "expand all"},
+			{Keys: []string{"X"}, Desc: "collapse all"},
 			{Keys: []string{"/"}, Desc: "search"},
 			{Keys: []string{"n"}, Desc: "next match"},
 			{Keys: []string{"N"}, Desc: "previous match"},

@@ -1,9 +1,6 @@
 package tui
 
-import (
-	"reflect"
-	"testing"
-)
+import "testing"
 
 // ts is a fixed, realistic timestamp prefix. Every raw log line from the
 // GitHub Actions API starts with one of these.
@@ -56,24 +53,42 @@ func TestParseLogSections_UnclosedGroupConsumesRest(t *testing.T) {
 	}
 }
 
-// TODO: implement TestSectionForRawLine.
-//
-// Purpose: sectionForRawLine must return the section that "owns" a raw line
-// index for ANY raw index in [0, len(lines)). The tricky part is that
-// section.lines excludes the ##[group] header AND the ##[endgroup] line —
-// but those lines DO exist in the raw input and search matches can land on
-// them.
-//
-// Pick coverage that pins the behavior. At minimum, assert:
-//   - An orphan line before any group maps to the orphan section.
-//   - A group header line maps to that group's section.
-//   - A line inside a group body maps to that group's section.
-//   - A ##[endgroup] line maps to the group it closes (NOT the next section).
-//   - An orphan line after a group maps to the trailing orphan section.
-//
-// Use the same `lines` fixture as TestParseLogSections_SplitsGroupsAndOrphans
-// so the expected section indices are easy to reason about.
 func TestSectionForRawLine(t *testing.T) {
-	t.Skip("implement me — see comment above")
-	_ = reflect.DeepEqual // silences unused import until you implement
+	// Raw indices map out as:
+	//   0: orphan           -> section 0 (orphan)
+	//   1: ##[group]Setup   -> section 1 (group)
+	//   2: body             -> section 1
+	//   3: body             -> section 1
+	//   4: ##[endgroup]     -> section 1  (closes group, not the next section)
+	//   5: orphan           -> section 2 (orphan)
+	//   6: ##[group]Upload  -> section 3 (group)
+	//   7: body             -> section 3
+	//   8: ##[endgroup]     -> section 3
+	lines := []string{
+		ts + "Starting job",
+		ts + "##[group]Setup node",
+		ts + "downloading…",
+		ts + "installed",
+		ts + "##[endgroup]",
+		ts + "running tests",
+		ts + "##[group]Upload artifact",
+		ts + "uploading…",
+		ts + "##[endgroup]",
+	}
+	sections := parseLogSections(lines)
+
+	want := []int{0, 1, 1, 1, 1, 2, 3, 3, 3}
+	for raw, expected := range want {
+		got := sectionForRawLine(sections, raw)
+		if got != expected {
+			t.Errorf("rawIdx=%d: got section %d, want %d", raw, got, expected)
+		}
+	}
+}
+
+func TestSectionForRawLine_OutOfRange(t *testing.T) {
+	sections := parseLogSections([]string{ts + "only line"})
+	if got := sectionForRawLine(sections, 99); got != -1 {
+		t.Errorf("out-of-range index should return -1, got %d", got)
+	}
 }
