@@ -34,7 +34,19 @@ const (
 	logTailSettle    = 300 * time.Millisecond
 	logTailLines     = 10
 	toastTTL         = 3 * time.Second
+	// repoErrorTTL caps how long a per-repo fetch error remains visible in
+	// the header. A persistent failure refreshes the expiry on each retry,
+	// so only truly transient blips self-clear.
+	repoErrorTTL = 15 * time.Second
 )
+
+// repoError carries a failed-fetch message with an expiry so transient
+// errors don't linger in the header.
+type repoError struct {
+	repo    string
+	msg     string
+	expires time.Time
+}
 
 type toastLevel int
 
@@ -106,7 +118,7 @@ type model struct {
 	watches        map[watchKey]*watchState
 	repoWorkflows  map[string][]string
 	repoFetching   map[string]bool
-	err            error
+	repoErrors     map[string]repoError
 	rateLimited    bool
 	rateLimitReset time.Time
 	spinnerIndex   int
@@ -152,6 +164,7 @@ func New(cfg config.Config) tea.Model {
 		watches:       watches,
 		repoWorkflows: repoWorkflows,
 		repoFetching:  make(map[string]bool),
+		repoErrors:    make(map[string]repoError),
 		filter:        filterState{status: statusAll},
 		filterInput:   ti,
 		overview:      newOverview(),
@@ -235,7 +248,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.rateLimited = false
 		if msg.err != nil {
-			m.err = msg.err
+			m.repoErrors[msg.repo] = repoError{
+				repo:    msg.repo,
+				msg:     msg.err.Error(),
+				expires: time.Now().Add(repoErrorTTL),
+			}
 		} else {
 			now := time.Now()
 			for wf, runs := range msg.results {
@@ -254,7 +271,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					st.active = false
 				}
 			}
-			m.err = nil
+			delete(m.repoErrors, msg.repo)
 			m.overview.SetRuns(m.allRuns())
 			m.syncDetailSelection()
 			if id := m.overview.SelectedID(); id != 0 {
@@ -530,6 +547,45 @@ func (m model) openLogViewer() (tea.Model, tea.Cmd) {
 	}
 }
 
+// activeRepoErrors returns unexpired per-repo fetch errors. Side effect: it
+// also prunes expired entries from m.repoErrors so the map doesn't grow.
+func (m *model) activeRepoErrors() []repoError {
+	now := time.Now()
+	var out []repoError
+	for repo, e := range m.repoErrors {
+		if now.After(e.expires) {
+			delete(m.repoErrors, repo)
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+// renderRepoErrors returns the header fragment for active errors, or "".
+// One error: compact single-line message. Multiple: summary count.
+func (m *model) renderRepoErrors() string {
+	errs := m.activeRepoErrors()
+	switch len(errs) {
+	case 0:
+		return ""
+	case 1:
+		return failureStyle.Render(fmt.Sprintf("error: %s: %s", errs[0].repo, truncateMsg(errs[0].msg, 60)))
+	default:
+		return failureStyle.Render(fmt.Sprintf("⚠ %d repos failing", len(errs)))
+	}
+}
+
+// truncateMsg shortens s to at most max runes, appending … when clipped.
+// Operates on runes so multi-byte UTF-8 isn't cut mid-character.
+func truncateMsg(s string, max int) string {
+	rs := []rune(s)
+	if len(rs) <= max {
+		return s
+	}
+	return string(rs[:max-1]) + "…"
+}
+
 // isInitialLoading reports whether we're in the cold-start window where at
 // least one watch has never returned and no runs are visible yet. Used to
 // decide between showing a spinner placeholder or "no runs".
@@ -570,8 +626,8 @@ func (m model) View() string {
 			header += runningStyle.Render("  [rate limited, retrying…]")
 		}
 	}
-	if m.err != nil {
-		header += "  " + failureStyle.Render(fmt.Sprintf("error: %s", m.err))
+	if summary := m.renderRepoErrors(); summary != "" {
+		header += "  " + summary
 	}
 
 	if m.mode == modeLogs {
