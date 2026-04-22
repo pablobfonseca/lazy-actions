@@ -35,7 +35,19 @@ make install    # to $GOBIN
 
 ## Configuration
 
-Create `config.yaml` in the current directory or at `~/.config/lazy-actions/config.yaml`:
+`lazy-actions` resolves what to watch from two places, in order:
+
+1. **Saved config** at `~/.config/lazy-actions/config.yaml` (or `./config.yaml` for backward compatibility).
+2. **Auto-detect** from the current directory: `git remote get-url origin` → `owner/repo`, plus every `.github/workflows/*.{yml,yaml}` file.
+
+Both sources apply when you run inside a git checkout:
+
+- No saved config, but CWD is a GitHub repo → auto-detected entry is used as the whole config.
+- Saved config only → used as-is.
+- Both, and the detected repo is already in saved → saved wins silently.
+- Both, and the detected repo is new → you're prompted once: `Merge with your saved config for this session? [Y/n]`. Merging is in-memory only; `config.yaml` is not modified.
+
+### Saved config format
 
 ```yaml
 watches:
