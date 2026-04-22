@@ -136,10 +136,7 @@ func (o *overviewModel) refreshOwnerSameness() {
 	o.sameOwner = true
 	o.owner = ""
 	for _, r := range o.runs {
-		owner := r.Repo
-		if idx := strings.Index(r.Repo, "/"); idx >= 0 {
-			owner = r.Repo[:idx]
-		}
+		owner, _, _ := strings.Cut(r.Repo, "/")
 		if o.owner == "" {
 			o.owner = owner
 		} else if owner != o.owner {
@@ -152,8 +149,8 @@ func (o *overviewModel) refreshOwnerSameness() {
 
 func (o *overviewModel) displayRepo(repo string) string {
 	if o.sameOwner {
-		if idx := strings.Index(repo, "/"); idx >= 0 {
-			return repo[idx+1:]
+		if _, name, ok := strings.Cut(repo, "/"); ok {
+			return name
 		}
 	}
 	return repo

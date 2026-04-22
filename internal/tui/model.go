@@ -603,14 +603,10 @@ func (m model) isInitialLoading() bool {
 
 // isRefreshing reports whether any repo fetch is currently in flight. Used
 // for a subtle header indicator during background refreshes (distinct from
-// initial loading, which replaces the entire overview body).
+// initial loading, which replaces the entire overview body). Entries are
+// deleted (not set to false) on completion, so map length is enough.
 func (m model) isRefreshing() bool {
-	for _, fetching := range m.repoFetching {
-		if fetching {
-			return true
-		}
-	}
-	return false
+	return len(m.repoFetching) > 0
 }
 
 func (m model) View() string {
@@ -641,20 +637,14 @@ func (m model) View() string {
 	}
 
 	overview := m.overview.View(m.spinnerIndex, m.isInitialLoading())
-	leftInner := overviewWidth(m.width) - 4 // borders + padding
-	if leftInner < 10 {
-		leftInner = 10
-	}
+	leftInner := max(overviewWidth(m.width)-4, 10) // borders + padding
 	left := activePaneBorder.Width(leftInner).Render(overview)
 
 	var body string
 	if detailWidth(m.width) == 0 {
 		body = left
 	} else {
-		rightInner := detailWidth(m.width) - 4
-		if rightInner < 10 {
-			rightInner = 10
-		}
+		rightInner := max(detailWidth(m.width)-4, 10)
 		right := paneBorderStyle.Width(rightInner).Render(m.detail.View())
 		body = lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 	}
@@ -875,9 +865,6 @@ func repoFetchCmd(repo string, wfs []string, bc *gh.BranchCache, jc *gh.JobCache
 }
 
 func scheduleRateLimitRetry(resetAt time.Time) tea.Cmd {
-	wait := time.Until(resetAt) + 2*time.Second
-	if wait < 10*time.Second {
-		wait = 10 * time.Second
-	}
+	wait := max(time.Until(resetAt)+2*time.Second, 10*time.Second)
 	return tea.Tick(wait, func(t time.Time) tea.Msg { return rateLimitRetryMsg{} })
 }

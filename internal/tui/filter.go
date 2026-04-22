@@ -16,7 +16,7 @@ const (
 
 type filterState struct {
 	status filterStatus
-	fuzzy  string // Task 5 uses this
+	fuzzy  string
 }
 
 func applyFilters(runs []gh.RunInfo, f filterState) []gh.RunInfo {

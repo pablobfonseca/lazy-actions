@@ -57,13 +57,8 @@ func (v *logViewer) Open(title string, width, height int) {
 	v.collapsed = map[int]bool{}
 	v.forceExpand = map[int]bool{}
 	v.current = 0
-	if width < 1 {
-		width = 1
-	}
-	vpHeight := height - 3
-	if vpHeight < 1 {
-		vpHeight = 1
-	}
+	width = max(width, 1)
+	vpHeight := max(height-3, 1)
 	v.vp.Width = width
 	v.vp.Height = vpHeight
 	v.vp.SetContent("")
