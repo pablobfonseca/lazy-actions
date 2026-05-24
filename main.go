@@ -14,9 +14,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	p := tea.NewProgram(newModel(cfg), tea.WithAltScreen())
+	tracker := NewNotifyTracker()
+	p := tea.NewProgram(newModel(cfg, tracker), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
+		tracker.ClearAll()
 		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 		os.Exit(1)
 	}
+	tracker.ClearAll()
 }

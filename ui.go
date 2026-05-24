@@ -84,7 +84,7 @@ type model struct {
 	notifyTracker  *NotifyTracker
 }
 
-func newModel(cfg Config) model {
+func newModel(cfg Config, tracker *NotifyTracker) model {
 	watches := make(map[watchKey]*watchState)
 	var order []watchKey
 	repoWorkflows := make(map[string][]string)
@@ -107,7 +107,7 @@ func newModel(cfg Config) model {
 		width:         80,
 		branchCache:   NewBranchCache(),
 		jobCache:      NewJobCache(),
-		notifyTracker: NewNotifyTracker(),
+		notifyTracker: tracker,
 	}
 }
 
