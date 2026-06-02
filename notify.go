@@ -1,8 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 )
@@ -22,22 +25,32 @@ type notification struct {
 }
 
 // NotifyTracker detects run state transitions and sends desktop notifications.
+// Workflows opted into mobile delivery additionally trigger a brrr.now push when
+// a run completes.
 type NotifyTracker struct {
 	mu          sync.Mutex
 	states      map[int64]runState // run ID -> last known state
 	initialized map[watchKey]bool  // skip notifications on first fetch per watch
 	groups      map[string]bool    // groups we've sent — used by ClearAll on shutdown
 	notifierBin string             // path to terminal-notifier; empty falls back to osascript
+	mobile      map[watchKey]bool  // workflows opted into mobile push notifications
+	mobileNotif *MobileNotifier
+	statePath   string // where the mobile selection is persisted
 }
 
 func NewNotifyTracker() *NotifyTracker {
 	bin, _ := exec.LookPath("terminal-notifier")
-	return &NotifyTracker{
+	nt := &NotifyTracker{
 		states:      make(map[int64]runState),
 		initialized: make(map[watchKey]bool),
 		groups:      make(map[string]bool),
 		notifierBin: bin,
+		mobile:      make(map[watchKey]bool),
+		mobileNotif: NewMobileNotifier(),
+		statePath:   mobileStatePath(),
 	}
+	nt.loadMobileState()
+	return nt
 }
 
 // CheckAndNotify compares new runs against tracked state and sends notifications.
@@ -69,6 +82,9 @@ func (nt *NotifyTracker) CheckAndNotify(key watchKey, runs []RunInfo) {
 
 		if n, ok := buildNotification(r, prev, tracked, newState); ok {
 			go nt.send(n)
+			if newState.status == "completed" && nt.mobile[key] {
+				go nt.mobileNotif.Send(n)
+			}
 		}
 	}
 }
@@ -188,6 +204,72 @@ func terminalNotifierArgs(n notification) []string {
 		args = append(args, "-open", n.openURL)
 	}
 	return args
+}
+
+// ToggleMobile flips mobile push delivery for a workflow and persists the change.
+func (nt *NotifyTracker) ToggleMobile(key watchKey) {
+	nt.mu.Lock()
+	if nt.mobile[key] {
+		delete(nt.mobile, key)
+	} else {
+		nt.mobile[key] = true
+	}
+	nt.mu.Unlock()
+	nt.saveMobileState()
+}
+
+// IsMobileEnabled reports whether a workflow is opted into mobile push delivery.
+func (nt *NotifyTracker) IsMobileEnabled(key watchKey) bool {
+	nt.mu.Lock()
+	defer nt.mu.Unlock()
+	return nt.mobile[key]
+}
+
+// MobileConfigured reports whether a brrr.now token is available to send with.
+func (nt *NotifyTracker) MobileConfigured() bool {
+	return nt.mobileNotif.Configured()
+}
+
+// mobileSelection is the persisted form of a single opted-in workflow.
+type mobileSelection struct {
+	Repo     string `json:"repo"`
+	Workflow string `json:"workflow"`
+}
+
+func mobileStatePath() string {
+	return filepath.Join(os.Getenv("HOME"), ".config", "gh-action-monitor", "mobile-notify.json")
+}
+
+func (nt *NotifyTracker) loadMobileState() {
+	data, err := os.ReadFile(nt.statePath)
+	if err != nil {
+		return
+	}
+	var sel []mobileSelection
+	if json.Unmarshal(data, &sel) != nil {
+		return
+	}
+	for _, s := range sel {
+		nt.mobile[watchKey{s.Repo, s.Workflow}] = true
+	}
+}
+
+func (nt *NotifyTracker) saveMobileState() {
+	nt.mu.Lock()
+	sel := make([]mobileSelection, 0, len(nt.mobile))
+	for k := range nt.mobile {
+		sel = append(sel, mobileSelection{k.repo, k.workflow})
+	}
+	nt.mu.Unlock()
+
+	data, err := json.MarshalIndent(sel, "", "  ")
+	if err != nil {
+		return
+	}
+	if os.MkdirAll(filepath.Dir(nt.statePath), 0o755) != nil {
+		return
+	}
+	os.WriteFile(nt.statePath, data, 0o644)
 }
 
 func osascriptScript(n notification) string {

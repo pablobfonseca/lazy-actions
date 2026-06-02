@@ -8,6 +8,8 @@ import (
 )
 
 func main() {
+	loadDotEnv()
+
 	cfg, err := loadConfig()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", err)

@@ -1,3 +1,4 @@
 gh-action-monitor
 .claude/
 config.yaml
+.env

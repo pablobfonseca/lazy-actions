@@ -38,8 +38,14 @@ var (
 	branchStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("141"))
 
+	cursorStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("39"))
+
 	spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 )
+
+const bellMarker = "🔔"
 
 const (
 	activeInterval   = 10 * time.Second
@@ -82,6 +88,8 @@ type model struct {
 	branchCache    *BranchCache
 	jobCache       *JobCache
 	notifyTracker  *NotifyTracker
+	selectMode     bool // mobile-notification selection mode (toggled with "n")
+	cursor         int  // index into the displayed groups while in selectMode
 }
 
 func newModel(cfg Config, tracker *NotifyTracker) model {
@@ -124,9 +132,20 @@ func (m model) Init() tea.Cmd {
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if m.selectMode {
+			return m.handleSelectKey(msg)
+		}
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
+		case "n":
+			if _, order := m.groupedRuns(); len(order) > 0 {
+				m.selectMode = true
+				if m.cursor >= len(order) {
+					m.cursor = 0
+				}
+			}
+			return m, nil
 		case "r":
 			var cmds []tea.Cmd
 			for repo, workflows := range m.repoWorkflows {
@@ -231,6 +250,62 @@ func isActive(runs []RunInfo) bool {
 	return false
 }
 
+// handleSelectKey processes key presses while in mobile-notification selection mode.
+func (m model) handleSelectKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	_, order := m.groupedRuns()
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "n", "esc", "q":
+		m.selectMode = false
+	case "up", "k":
+		if m.cursor > 0 {
+			m.cursor--
+		}
+	case "down", "j":
+		if m.cursor < len(order)-1 {
+			m.cursor++
+		}
+	case " ", "enter":
+		if m.cursor < len(order) {
+			m.notifyTracker.ToggleMobile(order[m.cursor])
+		}
+	}
+	return m, nil
+}
+
+// groupedRuns collects all known runs grouped by repo/workflow, ordered with the
+// most recently active group first. Shared by the renderer and the selection
+// cursor so both agree on what each row points at.
+func (m model) groupedRuns() (map[watchKey][]RunInfo, []watchKey) {
+	groups := make(map[watchKey][]RunInfo)
+	var order []watchKey
+	for _, state := range m.watches {
+		for _, r := range state.runs {
+			key := watchKey{r.Repo, r.Workflow}
+			if _, exists := groups[key]; !exists {
+				order = append(order, key)
+			}
+			groups[key] = append(groups[key], r)
+		}
+	}
+
+	// Sort groups by latest run start time (most recent first), stable tiebreak by name.
+	sort.SliceStable(order, func(i, j int) bool {
+		latestI := latestStartTime(groups[order[i]])
+		latestJ := latestStartTime(groups[order[j]])
+		if latestI.Equal(latestJ) {
+			if order[i].repo != order[j].repo {
+				return order[i].repo < order[j].repo
+			}
+			return order[i].workflow < order[j].workflow
+		}
+		return latestI.After(latestJ)
+	})
+
+	return groups, order
+}
+
 func (m model) View() string {
 	var b strings.Builder
 
@@ -253,14 +328,12 @@ func (m model) View() string {
 		b.WriteString("\n")
 	}
 
-	// Collect all runs for display
-	var allRuns []RunInfo
-	for _, state := range m.watches {
-		allRuns = append(allRuns, state.runs...)
-	}
+	groups, order := m.groupedRuns()
 
-	if len(allRuns) == 0 && m.err == nil {
+	if len(order) == 0 && m.err == nil {
 		b.WriteString(dimStyle.Render("  Loading..."))
+		b.WriteString("\n\n")
+		b.WriteString(dimStyle.Render(m.helpText()))
 		b.WriteString("\n")
 		return b.String()
 	}
@@ -268,10 +341,10 @@ func (m model) View() string {
 	// Check if all repos share the same owner
 	sameOwner := true
 	var commonOwner string
-	for _, r := range allRuns {
-		owner := r.Repo
-		if idx := strings.Index(r.Repo, "/"); idx >= 0 {
-			owner = r.Repo[:idx]
+	for _, key := range order {
+		owner := key.repo
+		if idx := strings.Index(key.repo, "/"); idx >= 0 {
+			owner = key.repo[:idx]
 		}
 		if commonOwner == "" {
 			commonOwner = owner
@@ -290,35 +363,18 @@ func (m model) View() string {
 		return repo
 	}
 
-	// Group runs by repo/workflow
-	type groupKey struct{ repo, workflow string }
-	groups := make(map[groupKey][]RunInfo)
-	var order []groupKey
-	for _, r := range allRuns {
-		key := groupKey{r.Repo, r.Workflow}
-		if _, exists := groups[key]; !exists {
-			order = append(order, key)
-		}
-		groups[key] = append(groups[key], r)
-	}
-
-	// Sort groups by latest run start time (most recent first), stable tiebreak by name
-	sort.SliceStable(order, func(i, j int) bool {
-		latestI := latestStartTime(groups[order[i]])
-		latestJ := latestStartTime(groups[order[j]])
-		if latestI.Equal(latestJ) {
-			if order[i].repo != order[j].repo {
-				return order[i].repo < order[j].repo
-			}
-			return order[i].workflow < order[j].workflow
-		}
-		return latestI.After(latestJ)
-	})
-
-	for _, key := range order {
+	for i, key := range order {
 		runs := groups[key]
-		b.WriteString(repoStyle.Render(fmt.Sprintf("  %s", displayRepo(key.repo))))
+		if m.selectMode && i == m.cursor {
+			b.WriteString(cursorStyle.Render("> "))
+		} else {
+			b.WriteString("  ")
+		}
+		b.WriteString(repoStyle.Render(displayRepo(key.repo)))
 		b.WriteString(dimStyle.Render(fmt.Sprintf(" / %s", key.workflow)))
+		if m.notifyTracker.IsMobileEnabled(key) {
+			b.WriteString(" " + bellMarker)
+		}
 		b.WriteString("\n")
 
 		hasContent := false
@@ -429,19 +485,31 @@ func (m model) View() string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString(dimStyle.Render("  r: refresh  q: quit"))
-	b.WriteString("\n")
+	footer := dimStyle.Render(m.helpText())
 
-	// Truncate to terminal height so the top (most recent) stays visible
-	output := b.String()
-	if m.height > 0 {
-		lines := strings.Split(output, "\n")
-		if len(lines) > m.height {
-			lines = lines[:m.height]
+	// Keep the body within the terminal height, but always pin the footer to the
+	// last line so the keyboard shortcuts stay visible even when runs overflow.
+	body := strings.TrimRight(b.String(), "\n")
+	if m.height > 1 {
+		lines := strings.Split(body, "\n")
+		if max := m.height - 1; len(lines) > max {
+			lines = lines[:max]
 		}
-		output = strings.Join(lines, "\n")
+		body = strings.Join(lines, "\n")
 	}
-	return output
+	return body + "\n" + footer
+}
+
+// helpText returns the keyboard-shortcut line shown pinned at the bottom.
+func (m model) helpText() string {
+	if m.selectMode {
+		help := fmt.Sprintf("  ↑/↓: move  space: toggle %s  n/esc: done", bellMarker)
+		if !m.notifyTracker.MobileConfigured() {
+			help += "  (set BRRR_TOKEN in .env)"
+		}
+		return help
+	}
+	return "  r: refresh  n: mobile notifications  q: quit"
 }
 
 var waitingStyle = lipgloss.NewStyle().
