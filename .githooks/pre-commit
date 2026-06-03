@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+#
+# Pre-commit hook: keeps the tree formatted, vetted, and buildable.
+# Enable once with:  git config core.hooksPath .githooks
+#
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+# Only act on staged Go files; nothing to do otherwise.
+staged_go_files="$(git diff --cached --name-only --diff-filter=ACM -- '*.go')"
+[ -z "$staged_go_files" ] && exit 0
+
+echo "pre-commit: gofmt"
+unformatted="$(gofmt -l $staged_go_files)"
+if [ -n "$unformatted" ]; then
+  echo "  ✗ these files need gofmt:" >&2
+  echo "$unformatted" | sed 's/^/      /' >&2
+  echo "  run: gofmt -w $unformatted" >&2
+  exit 1
+fi
+
+echo "pre-commit: go vet"
+go vet ./...
+
+echo "pre-commit: go build"
+go build ./...
+
+echo "pre-commit: ok"
