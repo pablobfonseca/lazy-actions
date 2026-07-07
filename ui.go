@@ -11,36 +11,39 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// Each color has a variant per terminal background: Dark values are the
+// original bright palette, Light values are darker equivalents that stay
+// readable on white. lipgloss detects the background once at startup.
 var (
 	titleStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("39"))
+			Foreground(lipgloss.AdaptiveColor{Light: "26", Dark: "39"})
 
 	repoStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("212"))
+			Foreground(lipgloss.AdaptiveColor{Light: "162", Dark: "212"})
 
 	runningStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("220"))
+			Foreground(lipgloss.AdaptiveColor{Light: "130", Dark: "220"})
 
 	successStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("82"))
+			Foreground(lipgloss.AdaptiveColor{Light: "28", Dark: "82"})
 
 	failureStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("196"))
+			Foreground(lipgloss.AdaptiveColor{Light: "160", Dark: "196"})
 
 	dimStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("245"))
+			Foreground(lipgloss.AdaptiveColor{Light: "243", Dark: "245"})
 
 	stepStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("117"))
+			Foreground(lipgloss.AdaptiveColor{Light: "31", Dark: "117"})
 
 	branchStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("141"))
+			Foreground(lipgloss.AdaptiveColor{Light: "97", Dark: "141"})
 
 	cursorStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("39"))
+			Foreground(lipgloss.AdaptiveColor{Light: "26", Dark: "39"})
 
 	spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 )
@@ -513,7 +516,7 @@ func (m model) helpText() string {
 }
 
 var waitingStyle = lipgloss.NewStyle().
-	Foreground(lipgloss.Color("245")).
+	Foreground(lipgloss.AdaptiveColor{Light: "243", Dark: "245"}).
 	Italic(true)
 
 // renderJobDetail renders a single job's status for the compact (single-job) view.
