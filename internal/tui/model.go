@@ -307,6 +307,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case claudeLogsMsg:
+		if msg.err != nil {
+			m.setToast(toastError, msg.err.Error())
+			return m, nil
+		}
+		return m, execClaudeCmd(*msg.run, msg.logPath)
+
+	case claudeDoneMsg:
+		if msg.err != nil {
+			m.setToast(toastError, "claude exited: "+msg.err.Error())
+		} else {
+			m.setToast(toastInfo, "claude session ended")
+		}
+		return m, nil
+
 	case downloadResultMsg:
 		if msg.err != nil {
 			m.setToast(toastError, msg.err.Error())
@@ -458,6 +473,17 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+	case "C":
+		r, ok := m.overview.Selected()
+		if !ok {
+			return m, nil
+		}
+		if !canFixWithClaude(r) {
+			m.setToast(toastError, "fix with claude needs a failed run")
+			return m, nil
+		}
+		m.setToast(toastInfo, "fetching failed job logs…")
+		return m, prepareClaudeCmd(r)
 	case "F":
 		r, ok := m.overview.Selected()
 		if !ok {

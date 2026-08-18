@@ -32,6 +32,7 @@ var keyMap = []keySection{
 			{Keys: []string{"y"}, Desc: "copy run URL"},
 			{Keys: []string{"Y"}, Desc: "copy commit SHA"},
 			{Keys: []string{"n"}, Desc: "toggle mobile notifications"},
+			{Keys: []string{"C"}, Desc: "fix failure with claude"},
 		},
 	},
 	{
