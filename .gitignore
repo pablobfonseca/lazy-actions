@@ -1,4 +1,7 @@
 gh-action-monitor
-.claude/
+lazyactions
+.claude/settings.local.json
 config.yaml
 .env
+_workspace/
+_workspace_prev/
