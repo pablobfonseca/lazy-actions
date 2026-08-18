@@ -6,11 +6,9 @@ Watch every workflow you care about in a single pane of glass: running jobs with
 
 ## Screenshots
 
-<!-- drop screenshots into docs/ with these names -->
+![Overview: run list with detail pane](docs/overview.png)
 
-![Overview: active runs with live log tail in the detail pane](docs/overview.png)
-
-![Fullscreen log viewer: folded groups, search with highlights](docs/logviewer.png)
+<!-- future shots go in docs/, e.g. docs/logviewer.png for the fullscreen log viewer -->
 
 ## Features
 
