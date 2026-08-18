@@ -3,7 +3,7 @@ package tui
 import (
 	"strings"
 
-	"github.com/upscopeio/lazy-actions/internal/gh"
+	"github.com/pablobfonseca/lazy-actions/internal/gh"
 )
 
 type filterStatus int

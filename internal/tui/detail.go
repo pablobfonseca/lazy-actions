@@ -7,7 +7,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/upscopeio/lazy-actions/internal/gh"
+	"github.com/pablobfonseca/lazy-actions/internal/gh"
 )
 
 type detailModel struct {

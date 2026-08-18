@@ -5,7 +5,7 @@ import (
 	"os/exec"
 	"sync"
 
-	"github.com/upscopeio/lazy-actions/internal/gh"
+	"github.com/pablobfonseca/lazy-actions/internal/gh"
 )
 
 type runState struct {

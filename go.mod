@@ -1,4 +1,4 @@
-module github.com/jdelia/gh-action-monitor
+module github.com/pablobfonseca/lazy-actions
 
 go 1.25.5
 

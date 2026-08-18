@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/upscopeio/lazy-actions/internal/gh"
+	"github.com/pablobfonseca/lazy-actions/internal/gh"
 )
 
 func fixtureRuns() []gh.RunInfo {

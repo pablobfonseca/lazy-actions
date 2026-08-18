@@ -11,10 +11,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/upscopeio/lazy-actions/internal/clip"
-	"github.com/upscopeio/lazy-actions/internal/config"
-	"github.com/upscopeio/lazy-actions/internal/gh"
-	"github.com/upscopeio/lazy-actions/internal/notify"
+	"github.com/pablobfonseca/lazy-actions/internal/clip"
+	"github.com/pablobfonseca/lazy-actions/internal/config"
+	"github.com/pablobfonseca/lazy-actions/internal/gh"
+	"github.com/pablobfonseca/lazy-actions/internal/notify"
 )
 
 type mode int
