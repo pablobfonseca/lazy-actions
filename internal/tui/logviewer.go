@@ -23,12 +23,12 @@ type logViewer struct {
 	loading    bool
 	err        error
 
-	sections       []logSection
-	collapsed      map[int]bool
-	forceExpand    map[int]bool
-	current        int   // current section index
-	sectionStarts  []int // rendered-line index where each section begins
-	lineToSection  []int // rendered-line index -> section index
+	sections      []logSection
+	collapsed     map[int]bool
+	forceExpand   map[int]bool
+	current       int   // current section index
+	sectionStarts []int // rendered-line index where each section begins
+	lineToSection []int // rendered-line index -> section index
 }
 
 func newLogViewer() *logViewer {

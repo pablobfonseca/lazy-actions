@@ -116,10 +116,10 @@ func TestParseLogSections_FlagsErrorsAndWarnings(t *testing.T) {
 
 func TestFirstErrorOrGroupIndex_PrefersErrorGroup(t *testing.T) {
 	sections := []logSection{
-		{lines: []string{"orphan"}},                                // 0: orphan
-		{header: "h", title: "Setup", lines: []string{"ok"}},       // 1: clean group
+		{lines: []string{"orphan"}},                                           // 0: orphan
+		{header: "h", title: "Setup", lines: []string{"ok"}},                  // 1: clean group
 		{header: "h", title: "Build", lines: []string{"err"}, hasError: true}, // 2: error group
-		{header: "h", title: "Upload", lines: []string{"ok"}},      // 3: clean group
+		{header: "h", title: "Upload", lines: []string{"ok"}},                 // 3: clean group
 	}
 	if got := firstErrorOrGroupIndex(sections); got != 2 {
 		t.Errorf("want 2 (error group), got %d", got)
