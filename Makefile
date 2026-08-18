@@ -1,9 +1,10 @@
-BINARY := lazy-actions
+BINARY := lazyactions
 BIN_DIR := bin
+INSTALL_DIR := $(HOME)/.local/bin
 
 .PHONY: build run test vet fmt check install clean help
 
-## build: compile binary to ./bin/lazy-actions
+## build: compile binary to ./bin/lazyactions
 build:
 	@mkdir -p $(BIN_DIR)
 	go build -o $(BIN_DIR)/$(BINARY) .
@@ -27,9 +28,10 @@ fmt:
 ## check: fmt + vet + test (what CI should run)
 check: fmt vet test
 
-## install: go install to $GOBIN
-install:
-	go install .
+## install: build and copy binary to ~/.local/bin/lazyactions
+install: build
+	@mkdir -p $(INSTALL_DIR)
+	cp $(BIN_DIR)/$(BINARY) $(INSTALL_DIR)/$(BINARY)
 
 ## clean: remove build artifacts
 clean:

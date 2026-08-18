@@ -4,6 +4,14 @@ A lazygit-style terminal UI for monitoring GitHub Actions workflow runs across m
 
 Watch every workflow you care about in a single pane of glass: running jobs with live step progress, recent failures with inline log tails, fullscreen log viewer with search — all driven by the keyboard.
 
+## Screenshots
+
+<!-- drop screenshots into docs/ with these names -->
+
+![Overview: active runs with live log tail in the detail pane](docs/overview.png)
+
+![Fullscreen log viewer: folded groups, search with highlights](docs/logviewer.png)
+
 ## Features
 
 - **At-a-glance overview** of every watched workflow run across every repo, grouped `Active` / `Recent`, sorted by recency.
@@ -29,8 +37,8 @@ Watch every workflow you care about in a single pane of glass: running jobs with
 ```sh
 go install github.com/pablobfonseca/lazy-actions@latest
 # or from a checkout:
-make build      # produces ./bin/lazy-actions
-make install    # to $GOBIN
+make build      # produces ./bin/lazyactions
+make install    # copies it to ~/.local/bin/lazyactions
 ```
 
 ## Configuration
