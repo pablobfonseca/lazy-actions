@@ -109,7 +109,7 @@ func (d *detailModel) shouldShowLogTail() bool {
 	return true
 }
 
-var kvKeyStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Width(10)
+var kvKeyStyle = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "243", Dark: "245"}).Width(10)
 
 func kv(k, v string) string {
 	return "  " + kvKeyStyle.Render(k) + v + "\n"
