@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"fmt"
@@ -17,10 +17,10 @@ type Config struct {
 	Watches []WatchEntry `yaml:"watches"`
 }
 
-func loadConfig() (Config, error) {
+func Load() (Config, error) {
 	paths := []string{
 		"config.yaml",
-		filepath.Join(os.Getenv("HOME"), ".config", "gh-action-monitor", "config.yaml"),
+		filepath.Join(os.Getenv("HOME"), ".config", "lazy-actions", "config.yaml"),
 	}
 
 	for _, p := range paths {
@@ -38,5 +38,5 @@ func loadConfig() (Config, error) {
 		return cfg, nil
 	}
 
-	return Config{}, fmt.Errorf("config.yaml not found in current directory or ~/.config/gh-action-monitor/")
+	return Config{}, fmt.Errorf("config.yaml not found in current directory or ~/.config/lazy-actions/")
 }

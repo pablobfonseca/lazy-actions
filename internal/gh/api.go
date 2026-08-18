@@ -1,4 +1,4 @@
-package main
+package gh
 
 import (
 	"encoding/json"
@@ -7,11 +7,10 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
-var errRateLimit = errors.New("GitHub API rate limit exceeded")
+var ErrRateLimit = errors.New("GitHub API rate limit exceeded")
 
 type RateLimitResponse struct {
 	Resources struct {
@@ -22,8 +21,8 @@ type RateLimitResponse struct {
 	} `json:"resources"`
 }
 
-// fetchRateLimitReset returns the time when the rate limit resets.
-func fetchRateLimitReset() time.Time {
+// FetchRateLimitReset returns the time when the rate limit resets.
+func FetchRateLimitReset() time.Time {
 	// rate_limit endpoint itself doesn't count against the limit
 	cmd := exec.Command("gh", "api", "rate_limit")
 	out, err := cmd.Output()
@@ -43,6 +42,7 @@ type WorkflowRun struct {
 	Status       string    `json:"status"`
 	Conclusion   string    `json:"conclusion"`
 	HeadBranch   string    `json:"head_branch"`
+	HeadSHA      string    `json:"head_sha"`
 	RunStartedAt time.Time `json:"run_started_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 	HTMLURL      string    `json:"html_url"`
@@ -62,6 +62,7 @@ type JobStep struct {
 }
 
 type Job struct {
+	ID         int64     `json:"id"`
 	Name       string    `json:"name"`
 	Status     string    `json:"status"`
 	HTMLURL    string    `json:"html_url"`
@@ -75,11 +76,14 @@ type JobsResponse struct {
 }
 
 type JobInfo struct {
+	ID          int64
 	Name        string
 	Status      string // "in_progress", "queued", "waiting"
 	CurrentStep string
 	URL         string
 	StartedAt   time.Time
+	UpdatedAt   time.Time
+	Conclusion  string
 }
 
 // RunInfo is the combined view of a workflow run with its active/failed jobs.
@@ -97,7 +101,7 @@ func ghAPI(endpoint string) ([]byte, error) {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			stderr := string(exitErr.Stderr)
 			if strings.Contains(stderr, "rate limit") || strings.Contains(stderr, "403") {
-				return nil, fmt.Errorf("%w: %s", errRateLimit, endpoint)
+				return nil, fmt.Errorf("%w: %s", ErrRateLimit, endpoint)
 			}
 			return nil, fmt.Errorf("gh api %s: %s", endpoint, stderr)
 		}
@@ -106,9 +110,9 @@ func ghAPI(endpoint string) ([]byte, error) {
 	return out, nil
 }
 
-// fetchRepoRuns fetches all runs for a repo in 3 API calls (in_progress, waiting, completed)
+// FetchRepoRuns fetches all runs for a repo in 3 API calls (in_progress, waiting, completed)
 // instead of 3 calls per workflow. Results are filtered to watched workflows by path.
-func fetchRepoRuns(repo string, workflows []string, branchCache *BranchCache, jobCache *JobCache) (map[string][]RunInfo, error) {
+func FetchRepoRuns(repo string, workflows []string, branchCache *BranchCache, jobCache *JobCache) (map[string][]RunInfo, error) {
 	// Map workflow file paths to config names for filtering
 	watchedPaths := make(map[string]string, len(workflows))
 	for _, wf := range workflows {
@@ -272,7 +276,7 @@ func ghGraphQL(query string) ([]byte, error) {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			stderr := string(exitErr.Stderr)
 			if strings.Contains(stderr, "rate limit") || strings.Contains(stderr, "403") {
-				return nil, fmt.Errorf("%w: graphql", errRateLimit)
+				return nil, fmt.Errorf("%w: graphql", ErrRateLimit)
 			}
 			return nil, fmt.Errorf("gh api graphql: %s", stderr)
 		}
@@ -339,76 +343,6 @@ func batchBranchExists(repo string, branches []string) map[string]bool {
 	return result
 }
 
-// BranchCache provides thread-safe cross-workflow caching of branch existence.
-type BranchCache struct {
-	mu    sync.Mutex
-	cache map[string]map[string]bool // repo -> branch -> exists
-}
-
-func NewBranchCache() *BranchCache {
-	return &BranchCache{cache: make(map[string]map[string]bool)}
-}
-
-// Lookup returns cached results and a list of branches not yet in the cache.
-func (bc *BranchCache) Lookup(repo string, branches []string) (found map[string]bool, missing []string) {
-	bc.mu.Lock()
-	defer bc.mu.Unlock()
-	repoBranches := bc.cache[repo]
-	found = make(map[string]bool, len(branches))
-	for _, b := range branches {
-		if exists, ok := repoBranches[b]; ok {
-			found[b] = exists
-		} else {
-			missing = append(missing, b)
-		}
-	}
-	return
-}
-
-// Store saves branch existence results into the cache.
-func (bc *BranchCache) Store(repo string, results map[string]bool) {
-	bc.mu.Lock()
-	defer bc.mu.Unlock()
-	if bc.cache[repo] == nil {
-		bc.cache[repo] = make(map[string]bool)
-	}
-	for branch, exists := range results {
-		bc.cache[repo][branch] = exists
-	}
-}
-
-// JobCache provides thread-safe caching of job details keyed by run ID and updated_at.
-// Avoids redundant API calls when a run's state hasn't changed between polls.
-type JobCache struct {
-	mu    sync.Mutex
-	cache map[int64]jobCacheEntry
-}
-
-type jobCacheEntry struct {
-	updatedAt time.Time
-	jobs      []JobInfo
-}
-
-func NewJobCache() *JobCache {
-	return &JobCache{cache: make(map[int64]jobCacheEntry)}
-}
-
-func (jc *JobCache) Get(runID int64, updatedAt time.Time) ([]JobInfo, bool) {
-	jc.mu.Lock()
-	defer jc.mu.Unlock()
-	entry, ok := jc.cache[runID]
-	if ok && entry.updatedAt.Equal(updatedAt) {
-		return entry.jobs, true
-	}
-	return nil, false
-}
-
-func (jc *JobCache) Set(runID int64, updatedAt time.Time, jobs []JobInfo) {
-	jc.mu.Lock()
-	defer jc.mu.Unlock()
-	jc.cache[runID] = jobCacheEntry{updatedAt: updatedAt, jobs: jobs}
-}
-
 func fetchJobs(repo string, runID int64) ([]Job, error) {
 	endpoint := fmt.Sprintf("repos/%s/actions/runs/%d/jobs?filter=latest", repo, runID)
 	data, err := ghAPI(endpoint)
@@ -434,18 +368,22 @@ func fetchActiveJobs(repo string, runID int64) []JobInfo {
 		switch job.Status {
 		case "waiting", "queued", "pending":
 			result = append(result, JobInfo{
+				ID:        job.ID,
 				Name:      job.Name,
 				Status:    job.Status,
 				URL:       job.HTMLURL,
 				StartedAt: job.StartedAt,
+				UpdatedAt: job.StartedAt,
 			})
 		case "in_progress":
 			result = append(result, JobInfo{
+				ID:          job.ID,
 				Name:        job.Name,
 				Status:      job.Status,
 				CurrentStep: currentStepForJob(job),
 				URL:         job.HTMLURL,
 				StartedAt:   job.StartedAt,
+				UpdatedAt:   job.StartedAt,
 			})
 		case "completed":
 			// Skip completed jobs in an active run
@@ -458,11 +396,13 @@ func fetchActiveJobs(repo string, runID int64) []JobInfo {
 			for j := len(jobs[i].Steps) - 1; j >= 0; j-- {
 				if jobs[i].Steps[j].Status == "completed" {
 					return []JobInfo{{
+						ID:          jobs[i].ID,
 						Name:        jobs[i].Name,
 						Status:      "in_progress",
 						CurrentStep: jobs[i].Steps[j].Name,
 						URL:         jobs[i].HTMLURL,
 						StartedAt:   jobs[i].StartedAt,
+						UpdatedAt:   jobs[i].StartedAt,
 					}}
 				}
 			}
@@ -498,11 +438,14 @@ func fetchFailedJobs(repo string, runID int64) []JobInfo {
 	for _, job := range jobs {
 		if job.Conclusion == "failure" {
 			result = append(result, JobInfo{
-				Name: job.Name,
-				URL:  job.HTMLURL,
+				ID:         job.ID,
+				Name:       job.Name,
+				URL:        job.HTMLURL,
+				StartedAt:  job.StartedAt,
+				UpdatedAt:  job.StartedAt,
+				Conclusion: job.Conclusion,
 			})
 		}
 	}
 	return result
 }
-
