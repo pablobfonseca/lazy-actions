@@ -1,4 +1,4 @@
-package main
+package notify
 
 import (
 	"encoding/json"
@@ -8,7 +8,14 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/pablobfonseca/lazy-actions/internal/gh"
 )
+
+// watchKey identifies a watched repo/workflow pair.
+type watchKey struct {
+	repo, workflow string
+}
 
 type runState struct {
 	status     string // "in_progress", "waiting", "completed"
@@ -67,7 +74,9 @@ func NewNotifyTracker() *NotifyTracker {
 
 // CheckAndNotify compares new runs against tracked state and sends notifications.
 // Returns immediately; notifications are sent asynchronously.
-func (nt *NotifyTracker) CheckAndNotify(key watchKey, runs []RunInfo) {
+func (nt *NotifyTracker) CheckAndNotify(repo, workflow string, runs []gh.RunInfo) {
+	key := watchKey{repo, workflow}
+
 	nt.mu.Lock()
 	defer nt.mu.Unlock()
 
@@ -106,7 +115,7 @@ func (nt *NotifyTracker) CheckAndNotify(key watchKey, runs []RunInfo) {
 }
 
 // buildNotification returns the notification for a state transition, or false if no notification applies.
-func buildNotification(r RunInfo, prev runState, tracked bool, ns runState) (notification, bool) {
+func buildNotification(r gh.RunInfo, prev runState, tracked bool, ns runState) (notification, bool) {
 	subtitle := fmt.Sprintf("%s · %s", r.Repo, r.Run.HeadBranch)
 	viewRun := notificationAction{"View Run", r.Run.HTMLURL}
 
@@ -209,7 +218,9 @@ func notifiCliArgs(n notification) []string {
 }
 
 // ToggleMobile flips mobile push delivery for a workflow and persists the change.
-func (nt *NotifyTracker) ToggleMobile(key watchKey) {
+func (nt *NotifyTracker) ToggleMobile(repo, workflow string) {
+	key := watchKey{repo, workflow}
+
 	nt.mu.Lock()
 	if nt.mobile[key] {
 		delete(nt.mobile, key)
@@ -221,10 +232,10 @@ func (nt *NotifyTracker) ToggleMobile(key watchKey) {
 }
 
 // IsMobileEnabled reports whether a workflow is opted into mobile push delivery.
-func (nt *NotifyTracker) IsMobileEnabled(key watchKey) bool {
+func (nt *NotifyTracker) IsMobileEnabled(repo, workflow string) bool {
 	nt.mu.Lock()
 	defer nt.mu.Unlock()
-	return nt.mobile[key]
+	return nt.mobile[watchKey{repo, workflow}]
 }
 
 // MobileConfigured reports whether at least one mobile channel can send.

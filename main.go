@@ -5,6 +5,9 @@ import (
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/pablobfonseca/lazy-actions/internal/config"
+	"github.com/pablobfonseca/lazy-actions/internal/tui"
 )
 
 func main() {
@@ -16,8 +19,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	tracker := NewNotifyTracker()
-	p := tea.NewProgram(newModel(cfg, tracker), tea.WithAltScreen())
+	p := tea.NewProgram(tui.New(cfg), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 		os.Exit(1)
@@ -27,14 +29,14 @@ func main() {
 // resolveConfig loads the saved config, falling back to auto-detection from
 // the current directory when no config file is found. Saved config always
 // wins; detection is never merged into it.
-func resolveConfig() (Config, error) {
-	cfg, err := loadConfig()
+func resolveConfig() (config.Config, error) {
+	cfg, err := config.Load()
 	if err == nil {
 		return cfg, nil
 	}
-	detected, detectErr := DetectFromCWD()
+	detected, detectErr := config.DetectFromCWD()
 	if detectErr != nil {
-		return Config{}, fmt.Errorf("no config found and auto-detect failed\n  config: %v\n  auto:   %v", err, detectErr)
+		return config.Config{}, fmt.Errorf("no config found and auto-detect failed\n  config: %v\n  auto:   %v", err, detectErr)
 	}
-	return Config{Watches: []WatchEntry{detected}}, nil
+	return config.Config{Watches: []config.WatchEntry{detected}}, nil
 }

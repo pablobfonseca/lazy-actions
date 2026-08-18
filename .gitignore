@@ -1,5 +1,7 @@
 gh-action-monitor
+lazy-actions
 lazyactions
+bin/
 .claude/settings.local.json
 config.yaml
 .env
