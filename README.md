@@ -81,6 +81,7 @@ Workflow names are the file names under `.github/workflows/` in each repo.
 | `d`            | normal      | Download artifacts (prompts for path)   |
 | `y` / `Y`      | normal      | Copy run URL / commit SHA               |
 | `n`            | normal      | Toggle mobile notifications for workflow |
+| `C`            | normal      | Fix failed run with Claude (opens `claude` primed with the failure logs) |
 | `a` / `f` / `A`| normal      | Filter: active / failed / all           |
 | `/`            | normal      | Fuzzy filter prompt                     |
 | `esc`          | normal      | Clear filter                            |
