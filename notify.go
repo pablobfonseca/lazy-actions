@@ -31,16 +31,23 @@ type notificationAction struct {
 	url   string
 }
 
+// mobileChannel is an away-from-screen delivery channel (brrr.now push,
+// Telegram, ...). Every configured channel receives a copy of the notification.
+type mobileChannel interface {
+	Configured() bool
+	Send(notification)
+}
+
 // NotifyTracker detects run state transitions and sends desktop notifications.
-// Workflows opted into mobile delivery additionally trigger a brrr.now push when
-// a run completes.
+// Workflows opted into mobile delivery additionally fan out to every configured
+// mobile channel when a run completes.
 type NotifyTracker struct {
 	mu          sync.Mutex
 	states      map[int64]runState // run ID -> last known state
 	initialized map[watchKey]bool  // skip notifications on first fetch per watch
 	notifierBin string             // path to notificli; empty falls back to osascript
 	mobile      map[watchKey]bool  // workflows opted into mobile push notifications
-	mobileNotif *MobileNotifier
+	channels    []mobileChannel
 	statePath   string // where the mobile selection is persisted
 }
 
@@ -51,7 +58,7 @@ func NewNotifyTracker() *NotifyTracker {
 		initialized: make(map[watchKey]bool),
 		notifierBin: bin,
 		mobile:      make(map[watchKey]bool),
-		mobileNotif: NewMobileNotifier(),
+		channels:    []mobileChannel{NewMobileNotifier(), NewTelegramNotifier()},
 		statePath:   mobileStatePath(),
 	}
 	nt.loadMobileState()
@@ -88,7 +95,11 @@ func (nt *NotifyTracker) CheckAndNotify(key watchKey, runs []RunInfo) {
 		if n, ok := buildNotification(r, prev, tracked, newState); ok {
 			go nt.send(n)
 			if newState.status == "completed" && nt.mobile[key] {
-				go nt.mobileNotif.Send(n)
+				for _, ch := range nt.channels {
+					if ch.Configured() {
+						go ch.Send(n)
+					}
+				}
 			}
 		}
 	}
@@ -216,9 +227,14 @@ func (nt *NotifyTracker) IsMobileEnabled(key watchKey) bool {
 	return nt.mobile[key]
 }
 
-// MobileConfigured reports whether a brrr.now token is available to send with.
+// MobileConfigured reports whether at least one mobile channel can send.
 func (nt *NotifyTracker) MobileConfigured() bool {
-	return nt.mobileNotif.Configured()
+	for _, ch := range nt.channels {
+		if ch.Configured() {
+			return true
+		}
+	}
+	return false
 }
 
 // mobileSelection is the persisted form of a single opted-in workflow.
