@@ -1,0 +1,35 @@
+name: smoke
+on:
+  workflow_dispatch:
+    inputs:
+      fail:
+        description: "force the check job to fail"
+        type: boolean
+        default: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: simulate work
+        run: sleep 45
+      - name: produce artifact
+        run: echo "smoke artifact from run $GITHUB_RUN_ID" > smoke.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smoke
+          path: smoke.txt
+
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: maybe fail
+        run: |
+          echo "##[group]smoke check"
+          echo "checking..."
+          echo "##[endgroup]"
+          if [ "${{ inputs.fail }}" = "true" ]; then
+            echo "##[error]forced failure for TUI verification"
+            exit 1
+          fi
+          echo "ok"
