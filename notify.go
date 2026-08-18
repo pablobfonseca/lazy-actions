@@ -20,8 +20,15 @@ type notification struct {
 	subtitle string
 	message  string
 	sound    string // empty = silent
-	group    string // dedup key — new notifications with same group replace old ones
 	openURL  string // opened when the user clicks the notification
+	actions  []notificationAction
+}
+
+// notificationAction is a button shown in the notification's dropdown.
+// Clicking it opens the associated URL.
+type notificationAction struct {
+	label string
+	url   string
 }
 
 // NotifyTracker detects run state transitions and sends desktop notifications.
@@ -31,19 +38,17 @@ type NotifyTracker struct {
 	mu          sync.Mutex
 	states      map[int64]runState // run ID -> last known state
 	initialized map[watchKey]bool  // skip notifications on first fetch per watch
-	groups      map[string]bool    // groups we've sent — used by ClearAll on shutdown
-	notifierBin string             // path to terminal-notifier; empty falls back to osascript
+	notifierBin string             // path to notificli; empty falls back to osascript
 	mobile      map[watchKey]bool  // workflows opted into mobile push notifications
 	mobileNotif *MobileNotifier
 	statePath   string // where the mobile selection is persisted
 }
 
 func NewNotifyTracker() *NotifyTracker {
-	bin, _ := exec.LookPath("terminal-notifier")
+	bin, _ := exec.LookPath("notificli")
 	nt := &NotifyTracker{
 		states:      make(map[int64]runState),
 		initialized: make(map[watchKey]bool),
-		groups:      make(map[string]bool),
 		notifierBin: bin,
 		mobile:      make(map[watchKey]bool),
 		mobileNotif: NewMobileNotifier(),
@@ -92,9 +97,7 @@ func (nt *NotifyTracker) CheckAndNotify(key watchKey, runs []RunInfo) {
 // buildNotification returns the notification for a state transition, or false if no notification applies.
 func buildNotification(r RunInfo, prev runState, tracked bool, ns runState) (notification, bool) {
 	subtitle := fmt.Sprintf("%s · %s", r.Repo, r.Run.HeadBranch)
-	// Grouping by run ID means the final state (passed/failed) replaces the
-	// "started" toast if it's still on screen — only one toast per run lingers.
-	group := fmt.Sprintf("ghmon-%d", r.Run.ID)
+	viewRun := notificationAction{"View Run", r.Run.HTMLURL}
 
 	switch {
 	case ns.status == "in_progress" && (!tracked || prev.status != "in_progress"):
@@ -102,8 +105,8 @@ func buildNotification(r RunInfo, prev runState, tracked bool, ns runState) (not
 			title:    "▶ " + r.Workflow,
 			subtitle: subtitle,
 			message:  "Started",
-			group:    group,
 			openURL:  r.Run.HTMLURL,
+			actions:  []notificationAction{viewRun},
 		}, true
 
 	case ns.status == "completed" && ns.conclusion == "success":
@@ -111,13 +114,14 @@ func buildNotification(r RunInfo, prev runState, tracked bool, ns runState) (not
 			title:    "✓ " + r.Workflow,
 			subtitle: subtitle,
 			message:  "Passed",
-			group:    group,
 			openURL:  r.Run.HTMLURL,
+			actions:  []notificationAction{viewRun},
 		}, true
 
 	case ns.status == "completed" && ns.conclusion == "failure":
 		message := "Failed"
 		openURL := r.Run.HTMLURL
+		actions := []notificationAction{viewRun}
 		if len(r.Jobs) > 0 {
 			names := make([]string, 0, len(r.Jobs))
 			for _, j := range r.Jobs {
@@ -125,14 +129,15 @@ func buildNotification(r RunInfo, prev runState, tracked bool, ns runState) (not
 			}
 			message = "Failed: " + strings.Join(names, ", ")
 			openURL = r.Jobs[0].URL
+			actions = append(actions, notificationAction{"View Failed Job", r.Jobs[0].URL})
 		}
 		return notification{
 			title:    "✗ " + r.Workflow,
 			subtitle: subtitle,
 			message:  message,
 			sound:    "Basso",
-			group:    group,
 			openURL:  openURL,
+			actions:  actions,
 		}, true
 
 	case ns.status == "completed" && ns.conclusion == "cancelled":
@@ -140,8 +145,8 @@ func buildNotification(r RunInfo, prev runState, tracked bool, ns runState) (not
 			title:    "⊘ " + r.Workflow,
 			subtitle: subtitle,
 			message:  "Cancelled",
-			group:    group,
 			openURL:  r.Run.HTMLURL,
+			actions:  []notificationAction{viewRun},
 		}, true
 	}
 
@@ -155,41 +160,23 @@ func (nt *NotifyTracker) send(n notification) {
 		return
 	}
 
-	if n.group != "" {
-		nt.mu.Lock()
-		nt.groups[n.group] = true
-		nt.mu.Unlock()
-		// Explicit remove before send: -group only replaces still-visible toasts,
-		// so this also clears the prior status from notification-center history.
-		exec.Command(nt.notifierBin, "-remove", n.group).Run()
-	}
-	exec.Command(nt.notifierBin, terminalNotifierArgs(n)...).Run()
-}
-
-// ClearAll removes every notification this tracker has sent. Called on shutdown.
-func (nt *NotifyTracker) ClearAll() {
-	if nt.notifierBin == "" {
+	// notificli blocks until the user clicks the notification, picks a dropdown
+	// action, or dismisses it, then prints the choice to stdout. A click on the
+	// body ("default") opens -url itself; dropdown actions we open here.
+	out, err := exec.Command(nt.notifierBin, notifiCliArgs(n)...).Output()
+	if err != nil {
 		return
 	}
-	nt.mu.Lock()
-	groups := make([]string, 0, len(nt.groups))
-	for g := range nt.groups {
-		groups = append(groups, g)
+	choice := strings.TrimSpace(string(out))
+	for _, a := range n.actions {
+		if choice == a.label {
+			exec.Command("open", a.url).Run()
+			return
+		}
 	}
-	nt.mu.Unlock()
-
-	var wg sync.WaitGroup
-	for _, g := range groups {
-		wg.Add(1)
-		go func(group string) {
-			defer wg.Done()
-			exec.Command(nt.notifierBin, "-remove", group).Run()
-		}(g)
-	}
-	wg.Wait()
 }
 
-func terminalNotifierArgs(n notification) []string {
+func notifiCliArgs(n notification) []string {
 	args := []string{"-title", n.title, "-message", n.message}
 	if n.subtitle != "" {
 		args = append(args, "-subtitle", n.subtitle)
@@ -197,11 +184,15 @@ func terminalNotifierArgs(n notification) []string {
 	if n.sound != "" {
 		args = append(args, "-sound", n.sound)
 	}
-	if n.group != "" {
-		args = append(args, "-group", n.group)
-	}
 	if n.openURL != "" {
-		args = append(args, "-open", n.openURL)
+		args = append(args, "-url", n.openURL)
+	}
+	if len(n.actions) > 0 {
+		labels := make([]string, 0, len(n.actions))
+		for _, a := range n.actions {
+			labels = append(labels, a.label)
+		}
+		args = append(args, "-actions", strings.Join(labels, ","))
 	}
 	return args
 }
