@@ -279,10 +279,10 @@ func sectionsContainingQuery(sections []logSection, query string) map[int]bool {
 
 var (
 	logGroupHeaderStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("141")).
+				Foreground(lipgloss.AdaptiveColor{Light: "97", Dark: "141"}).
 				Bold(true)
 
 	logGroupSelectedStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("39")).
+				Foreground(lipgloss.AdaptiveColor{Light: "26", Dark: "39"}).
 				Bold(true)
 )
