@@ -13,7 +13,7 @@ Root (`package main`) is startup only; everything else lives under `internal/`.
 
 | Path | Owns | Key entry points |
 |------|------|------------------|
-| `main.go` | Startup, config resolution | `main`, `resolveConfig` (saved config wins; autodetect is fallback-only, never merged) |
+| `main.go` | Startup, config resolution | `main`, `resolveConfig` (saved config + CWD autodetect always merged; detected entry appended unless its repo is already saved) |
 | `dotenv.go` | `.env` loading | `loadDotEnv` (`./.env` then `~/.config/gh-action-monitor/.env`; never overrides set vars) |
 | `main_test.go` | `resolveConfig` behavior | builds real temp git repos + config files |
 | `internal/config/config.go` | Saved config schema + loading | `Config`, `WatchEntry`, `Load` (cwd then `~/.config/gh-action-monitor/`) |

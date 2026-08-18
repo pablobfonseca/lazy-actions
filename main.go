@@ -26,17 +26,31 @@ func main() {
 	}
 }
 
-// resolveConfig loads the saved config, falling back to auto-detection from
-// the current directory when no config file is found. Saved config always
-// wins; detection is never merged into it.
+// resolveConfig merges the saved config with auto-detection from the current
+// directory: the detected entry is appended to the saved watches unless its
+// repo is already watched, in which case the saved entry wins untouched.
+// Either source may be missing; only when both fail is it an error.
 func resolveConfig() (config.Config, error) {
 	cfg, err := config.Load()
-	if err == nil {
+	detected, detectErr := config.DetectFromCWD()
+
+	switch {
+	case err != nil && detectErr != nil:
+		return config.Config{}, fmt.Errorf("no config found and auto-detect failed\n  config: %v\n  auto:   %v", err, detectErr)
+	case err != nil:
+		return config.Config{Watches: []config.WatchEntry{detected}}, nil
+	case detectErr != nil:
 		return cfg, nil
 	}
-	detected, detectErr := config.DetectFromCWD()
-	if detectErr != nil {
-		return config.Config{}, fmt.Errorf("no config found and auto-detect failed\n  config: %v\n  auto:   %v", err, detectErr)
+
+	for _, w := range cfg.Watches {
+		if w.Repo == detected.Repo {
+			return cfg, nil
+		}
 	}
-	return config.Config{Watches: []config.WatchEntry{detected}}, nil
+
+	merged := make([]config.WatchEntry, 0, len(cfg.Watches)+1)
+	merged = append(merged, cfg.Watches...)
+	merged = append(merged, detected)
+	return config.Config{Watches: merged}, nil
 }
