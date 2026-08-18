@@ -19,6 +19,8 @@ type overviewModel struct {
 	width     int
 	sameOwner bool
 	owner     string
+
+	mobileEnabled func(repo, workflow string) bool
 }
 
 func newOverview() *overviewModel {
@@ -216,11 +218,15 @@ func (o *overviewModel) renderLine(r gh.RunInfo, spinnerIndex int) string {
 	} else {
 		elapsed = formatDuration(time.Since(r.Run.RunStartedAt))
 	}
+	wf := r.Workflow
+	if o.mobileEnabled != nil && o.mobileEnabled(r.Repo, r.Workflow) {
+		wf += " 🔔"
+	}
 	line := fmt.Sprintf("%s %s  %s/%s · %s",
 		style.Render(icon),
 		style.Render(elapsed),
 		o.displayRepo(r.Repo),
-		r.Workflow,
+		wf,
 		branchStyle.Render(r.Run.HeadBranch),
 	)
 	prefix := "  "

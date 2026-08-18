@@ -159,6 +159,9 @@ func New(cfg config.Config) tea.Model {
 	ti := textinput.New()
 	ti.Placeholder = "filter (branch/workflow/repo)…"
 	ti.CharLimit = 64
+	tracker := notify.NewNotifyTracker()
+	ov := newOverview()
+	ov.mobileEnabled = tracker.IsMobileEnabled
 	return model{
 		config:        cfg,
 		watches:       watches,
@@ -167,7 +170,7 @@ func New(cfg config.Config) tea.Model {
 		repoErrors:    make(map[string]repoError),
 		filter:        filterState{status: statusAll},
 		filterInput:   ti,
-		overview:      newOverview(),
+		overview:      ov,
 		detail:        newDetail(),
 		help:          newHelp(),
 		confirm:       newConfirm(),
@@ -176,7 +179,7 @@ func New(cfg config.Config) tea.Model {
 		branchCache:   gh.NewBranchCache(),
 		jobCache:      gh.NewJobCache(),
 		logCache:      gh.NewLogCache(),
-		notifyTracker: notify.NewNotifyTracker(),
+		notifyTracker: tracker,
 		width:         80,
 	}
 }
@@ -417,6 +420,20 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "o":
 		if r, ok := m.overview.Selected(); ok && r.Run.HTMLURL != "" {
 			openURL(r.Run.HTMLURL)
+		}
+		return m, nil
+	case "n":
+		if r, ok := m.overview.Selected(); ok {
+			m.notifyTracker.ToggleMobile(r.Repo, r.Workflow)
+			if m.notifyTracker.IsMobileEnabled(r.Repo, r.Workflow) {
+				if m.notifyTracker.MobileConfigured() {
+					m.setToast(toastSuccess, "mobile notifications on for "+r.Workflow)
+				} else {
+					m.setToast(toastInfo, "mobile on for "+r.Workflow+" (set BRRR_TOKEN or TELEGRAM_* in .env)")
+				}
+			} else {
+				m.setToast(toastInfo, "mobile notifications off for "+r.Workflow)
+			}
 		}
 		return m, nil
 	case "y":
