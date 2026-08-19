@@ -3,7 +3,6 @@ package notify
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"html"
 	"net/http"
 	"os"
@@ -40,17 +39,7 @@ func (t *TelegramNotifier) Send(n notification) {
 		return
 	}
 
-	text := "<b>" + html.EscapeString(n.title) + "</b>\n" + html.EscapeString(mobileMessage(n))
-	if n.openURL != "" {
-		text += fmt.Sprintf("\n<a href=%q>View run</a>", n.openURL)
-	}
-
-	payload := map[string]string{
-		"chat_id":    t.chatID,
-		"text":       text,
-		"parse_mode": "HTML",
-	}
-	body, err := json.Marshal(payload)
+	body, err := telegramPayload(t.chatID, n)
 	if err != nil {
 		return
 	}
@@ -64,4 +53,31 @@ func (t *TelegramNotifier) Send(n notification) {
 		return
 	}
 	resp.Body.Close()
+}
+
+type telegramButton struct {
+	Text string `json:"text"`
+	URL  string `json:"url"`
+}
+
+func telegramPayload(chatID string, n notification) ([]byte, error) {
+	payload := map[string]any{
+		"chat_id":    chatID,
+		"text":       "<b>" + html.EscapeString(n.title) + "</b>\n" + html.EscapeString(mobileMessage(n)),
+		"parse_mode": "HTML",
+	}
+
+	buttons := n.actions
+	if len(buttons) == 0 && n.openURL != "" {
+		buttons = []notificationAction{{"View Run", n.openURL}}
+	}
+	if len(buttons) > 0 {
+		rows := make([][]telegramButton, 0, len(buttons))
+		for _, a := range buttons {
+			rows = append(rows, []telegramButton{{a.label, a.url}})
+		}
+		payload["reply_markup"] = map[string]any{"inline_keyboard": rows}
+	}
+
+	return json.Marshal(payload)
 }
