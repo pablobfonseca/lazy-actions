@@ -60,12 +60,18 @@ watches:
     workflows:
       - "ci.yml"
       - "deploy.yml"
+    notify:
+      only: failures # optional: "all" (default) or "failures"
+      quiet: # optional: local-time windows with no notifications
+        - "22:00-08:00"
   - repo: "your-org/other-repo"
     workflows:
       - "build.yml"
 ```
 
 Workflow names are the file names under `.github/workflows/` in each repo.
+
+Per-watch `notify` rules are optional. `only: failures` delivers only failure notifications (started/success/cancelled are suppressed, on desktop and mobile alike). `quiet` windows are `HH:MM-HH:MM` in local time, may wrap midnight, and silence all notifications for that watch while active; transitions that happen during a quiet window are dropped, not queued.
 
 ## Keybindings
 
