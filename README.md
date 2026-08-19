@@ -32,6 +32,14 @@ Watch every workflow you care about in a single pane of glass: running jobs with
 
 ## Install
 
+### Homebrew
+
+```sh
+brew install pablobfonseca/tap/lazyactions
+```
+
+### From source
+
 ```sh
 go install github.com/pablobfonseca/lazy-actions@latest
 # or from a checkout:
