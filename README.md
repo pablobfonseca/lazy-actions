@@ -55,6 +55,7 @@ Saved config always wins; auto-detection is a fallback, never merged in:
 ### Saved config format
 
 ```yaml
+mobile_idle_minutes: 5 # optional: mobile pushes only after N min without keyboard/mouse input
 watches:
   - repo: "your-org/your-repo"
     workflows:
@@ -72,6 +73,8 @@ watches:
 Workflow names are the file names under `.github/workflows/` in each repo.
 
 Per-watch `notify` rules are optional. `only: failures` delivers only failure notifications (started/success/cancelled are suppressed, on desktop and mobile alike). `quiet` windows are `HH:MM-HH:MM` in local time, may wrap midnight, and silence all notifications for that watch while active; transitions that happen during a quiet window are dropped, not queued.
+
+`mobile_idle_minutes` gates the mobile channels (brrr.now, Telegram) on away-from-screen detection: pushes are sent only when macOS reports at least that many minutes without keyboard or mouse input (`HIDIdleTime`). `0` or omitted sends them regardless. Desktop notifications are never gated.
 
 ## Keybindings
 
