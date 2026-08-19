@@ -1,6 +1,7 @@
 package notify
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -131,6 +132,7 @@ func TestParseHIDIdleNanos(t *testing.T) {
 		{"embedded in dump", "junk\n  \"HIDIdleTime\" = 90000000000\nmore", 90000000000, false},
 		{"missing", "no idle info here", 0, true},
 		{"empty", "", 0, true},
+		{"scientific notation", `    "HIDIdleTime" = 1.5e9`, 0, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -152,5 +154,79 @@ func TestSystemIdleLive(t *testing.T) {
 	}
 	if d < 0 || d > 24*time.Hour {
 		t.Errorf("implausible idle duration %v", d)
+	}
+}
+
+func TestAwayFromScreen(t *testing.T) {
+	tests := []struct {
+		name    string
+		idleMin time.Duration
+		stub    func(*testing.T) func() (time.Duration, error)
+		want    bool
+	}{
+		{
+			name:    "zero threshold short-circuits",
+			idleMin: 0,
+			stub: func(t *testing.T) func() (time.Duration, error) {
+				return func() (time.Duration, error) {
+					t.Error("systemIdleFn called despite zero threshold")
+					return 0, nil
+				}
+			},
+			want: true,
+		},
+		{
+			name:    "negative threshold short-circuits",
+			idleMin: -5 * time.Minute,
+			stub: func(t *testing.T) func() (time.Duration, error) {
+				return func() (time.Duration, error) {
+					t.Error("systemIdleFn called despite negative threshold")
+					return 0, nil
+				}
+			},
+			want: true,
+		},
+		{
+			name:    "ioreg error fails open",
+			idleMin: 5 * time.Minute,
+			stub: func(t *testing.T) func() (time.Duration, error) {
+				return func() (time.Duration, error) {
+					return 0, errors.New("ioreg exploded")
+				}
+			},
+			want: true,
+		},
+		{
+			name:    "idle at threshold",
+			idleMin: 5 * time.Minute,
+			stub: func(t *testing.T) func() (time.Duration, error) {
+				return func() (time.Duration, error) {
+					return 5 * time.Minute, nil
+				}
+			},
+			want: true,
+		},
+		{
+			name:    "idle below threshold",
+			idleMin: 5 * time.Minute,
+			stub: func(t *testing.T) func() (time.Duration, error) {
+				return func() (time.Duration, error) {
+					return 4*time.Minute + 59*time.Second, nil
+				}
+			},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			orig := systemIdleFn
+			t.Cleanup(func() { systemIdleFn = orig })
+			systemIdleFn = tt.stub(t)
+
+			nt := &NotifyTracker{mobileIdleMin: tt.idleMin}
+			if got := nt.awayFromScreen(); got != tt.want {
+				t.Errorf("awayFromScreen() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

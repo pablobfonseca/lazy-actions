@@ -130,13 +130,22 @@ func (nt *NotifyTracker) CheckAndNotify(repo, workflow string, runs []gh.RunInfo
 
 		if n, ok := buildNotification(r, prev, tracked, newState); ok {
 			go nt.send(n)
-			if newState.status == "completed" && nt.mobile[key] && nt.awayFromScreen() {
-				for _, ch := range nt.channels {
-					if ch.Configured() {
-						go ch.Send(n)
-					}
-				}
+			if newState.status == "completed" && nt.mobile[key] {
+				go nt.fanOutMobile(n)
 			}
+		}
+	}
+}
+
+// mobileIdleMin and channels are immutable after construction, so
+// fanOutMobile reads them without nt.mu.
+func (nt *NotifyTracker) fanOutMobile(n notification) {
+	if !nt.awayFromScreen() {
+		return
+	}
+	for _, ch := range nt.channels {
+		if ch.Configured() {
+			go ch.Send(n)
 		}
 	}
 }
@@ -347,7 +356,7 @@ func osascriptScript(n notification) string {
 	return script
 }
 
-var hidIdleRe = regexp.MustCompile(`"HIDIdleTime"\s*=\s*(\d+)`)
+var hidIdleRe = regexp.MustCompile(`(?m)"HIDIdleTime"\s*=\s*(\d+)\s*$`)
 
 func parseHIDIdleNanos(out []byte) (int64, error) {
 	m := hidIdleRe.FindSubmatch(out)
@@ -356,6 +365,8 @@ func parseHIDIdleNanos(out []byte) (int64, error) {
 	}
 	return strconv.ParseInt(string(m[1]), 10, 64)
 }
+
+var systemIdleFn = systemIdle
 
 func systemIdle() (time.Duration, error) {
 	out, err := exec.Command("ioreg", "-c", "IOHIDSystem").Output()
@@ -375,7 +386,7 @@ func (nt *NotifyTracker) awayFromScreen() bool {
 	if nt.mobileIdleMin <= 0 {
 		return true
 	}
-	d, err := systemIdle()
+	d, err := systemIdleFn()
 	if err != nil {
 		return true
 	}
