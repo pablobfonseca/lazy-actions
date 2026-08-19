@@ -31,6 +31,11 @@ type notification struct {
 	sound    string // empty = silent
 	openURL  string // opened when the user clicks the notification
 	actions  []notificationAction
+
+	// interactive keeps the desktop notificli process alive for click
+	// handling (-url/-actions); notificli blocks until dismissal whenever
+	// either flag is present, so only failures opt in.
+	interactive bool
 }
 
 // notificationAction is a button shown in the notification's dropdown.
@@ -170,12 +175,13 @@ func buildNotification(r gh.RunInfo, prev runState, tracked bool, ns runState) (
 			actions = append(actions, notificationAction{"View Failed Job", r.Jobs[0].URL})
 		}
 		return notification{
-			title:    "✗ " + r.Workflow,
-			subtitle: subtitle,
-			message:  message,
-			sound:    "Basso",
-			openURL:  openURL,
-			actions:  actions,
+			title:       "✗ " + r.Workflow,
+			subtitle:    subtitle,
+			message:     message,
+			sound:       "Basso",
+			openURL:     openURL,
+			actions:     actions,
+			interactive: true,
 		}, true
 
 	case ns.status == "completed" && ns.conclusion == "cancelled":
@@ -208,9 +214,15 @@ func (nt *NotifyTracker) send(n notification) {
 		return
 	}
 
-	// notificli blocks until the user clicks the notification, picks a dropdown
-	// action, or dismisses it, then prints the choice to stdout. A click on the
-	// body ("default") opens -url itself; dropdown actions we open here.
+	if !n.interactive {
+		exec.Command(nt.notifierBin, notifiCliArgs(n)...).Run()
+		return
+	}
+
+	// For interactive (failure) notifications notificli blocks until the user
+	// clicks the notification, picks a dropdown action, or dismisses it, then
+	// prints the choice to stdout. A click on the body ("default") opens -url
+	// itself; dropdown actions we open here.
 	out, err := exec.Command(nt.notifierBin, notifiCliArgs(n)...).Output()
 	if err != nil {
 		return
@@ -232,15 +244,17 @@ func notifiCliArgs(n notification) []string {
 	if n.sound != "" {
 		args = append(args, "-sound", n.sound)
 	}
-	if n.openURL != "" {
-		args = append(args, "-url", n.openURL)
-	}
-	if len(n.actions) > 0 {
-		labels := make([]string, 0, len(n.actions))
-		for _, a := range n.actions {
-			labels = append(labels, a.label)
+	if n.interactive {
+		if n.openURL != "" {
+			args = append(args, "-url", n.openURL)
 		}
-		args = append(args, "-actions", strings.Join(labels, ","))
+		if len(n.actions) > 0 {
+			labels := make([]string, 0, len(n.actions))
+			for _, a := range n.actions {
+				labels = append(labels, a.label)
+			}
+			args = append(args, "-actions", strings.Join(labels, ","))
+		}
 	}
 	return args
 }

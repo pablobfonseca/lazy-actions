@@ -1,10 +1,12 @@
 package notify
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/pablobfonseca/lazy-actions/internal/config"
+	"github.com/pablobfonseca/lazy-actions/internal/gh"
 )
 
 func TestRuleAllows(t *testing.T) {
@@ -51,5 +53,69 @@ func TestNewNotifyTrackerBuildsRules(t *testing.T) {
 	}
 	if nt.rules[watchKey{"o/other", "build.yml"}].FailuresOnly() {
 		t.Error("rules for o/other build.yml unexpectedly failures-only")
+	}
+}
+
+func TestBuildNotificationInteractive(t *testing.T) {
+	run := func(status, conclusion string) gh.RunInfo {
+		r := gh.RunInfo{Repo: "o/r", Workflow: "ci.yml"}
+		r.Run.ID = 1
+		r.Run.Status = status
+		r.Run.Conclusion = conclusion
+		r.Run.HTMLURL = "https://example.com/run/1"
+		r.Run.HeadBranch = "main"
+		return r
+	}
+	tests := []struct {
+		name            string
+		status, concl   string
+		wantInteractive bool
+	}{
+		{"started", "in_progress", "", false},
+		{"success", "completed", "success", false},
+		{"cancelled", "completed", "cancelled", false},
+		{"failure", "completed", "failure", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ns := runState{status: tt.status, conclusion: tt.concl}
+			n, ok := buildNotification(run(tt.status, tt.concl), runState{}, false, ns)
+			if !ok {
+				t.Fatal("no notification built")
+			}
+			if n.interactive != tt.wantInteractive {
+				t.Errorf("interactive = %v, want %v", n.interactive, tt.wantInteractive)
+			}
+			if n.openURL == "" || len(n.actions) == 0 {
+				t.Error("openURL/actions must stay populated for mobile channels")
+			}
+		})
+	}
+}
+
+func TestNotifiCliArgsInteractivity(t *testing.T) {
+	base := notification{
+		title:    "t",
+		subtitle: "s",
+		message:  "m",
+		openURL:  "https://example.com/run/1",
+		actions:  []notificationAction{{"View Run", "https://example.com/run/1"}},
+	}
+
+	joined := func(n notification) string { return strings.Join(notifiCliArgs(n), " ") }
+
+	inter := base
+	inter.interactive = true
+	got := joined(inter)
+	if !strings.Contains(got, "-url") || !strings.Contains(got, "-actions") {
+		t.Errorf("interactive args missing -url/-actions: %q", got)
+	}
+
+	got = joined(base)
+	if strings.Contains(got, "-url") || strings.Contains(got, "-actions") {
+		t.Errorf("non-interactive args must omit -url/-actions: %q", got)
+	}
+	if !strings.Contains(got, "-title") || !strings.Contains(got, "-message") || !strings.Contains(got, "-subtitle") {
+		t.Errorf("non-interactive args lost basic fields: %q", got)
 	}
 }
