@@ -2,7 +2,7 @@ BINARY := lazyactions
 BIN_DIR := bin
 INSTALL_DIR := $(HOME)/.local/bin
 
-.PHONY: build run test vet fmt check install clean help
+.PHONY: build run test vet fmt check install clean release help
 
 ## build: compile binary to ./bin/lazyactions
 build:
@@ -36,6 +36,10 @@ install: build
 ## clean: remove build artifacts
 clean:
 	rm -rf $(BIN_DIR)
+
+## release: publish the pushed tag with goreleaser (needs gh auth)
+release:
+	GITHUB_TOKEN="$$(gh auth token)" goreleaser release --clean
 
 ## help: list targets
 help:

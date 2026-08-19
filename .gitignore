@@ -7,3 +7,4 @@ config.yaml
 .env
 _workspace/
 _workspace_prev/
+dist/
