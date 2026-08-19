@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/pablobfonseca/lazy-actions/internal/config"
 	"github.com/pablobfonseca/lazy-actions/internal/gh"
 )
 
@@ -54,12 +56,23 @@ type NotifyTracker struct {
 	initialized map[watchKey]bool  // skip notifications on first fetch per watch
 	notifierBin string             // path to notificli; empty falls back to osascript
 	mobile      map[watchKey]bool  // workflows opted into mobile push notifications
+	rules       map[watchKey]config.NotifyRules
 	channels    []mobileChannel
 	statePath   string // where the mobile selection is persisted
 }
 
-func NewNotifyTracker() *NotifyTracker {
+func NewNotifyTracker(cfg config.Config) *NotifyTracker {
 	bin, _ := exec.LookPath("notificli")
+	// First entry wins on duplicate repo/workflow pairs, matching the dedupe in tui.New.
+	rules := make(map[watchKey]config.NotifyRules)
+	for _, w := range cfg.Watches {
+		for _, wf := range w.Workflows {
+			key := watchKey{w.Repo, wf}
+			if _, ok := rules[key]; !ok {
+				rules[key] = w.Notify
+			}
+		}
+	}
 	nt := &NotifyTracker{
 		states:      make(map[int64]runState),
 		initialized: make(map[watchKey]bool),
@@ -67,6 +80,7 @@ func NewNotifyTracker() *NotifyTracker {
 		mobile:      make(map[watchKey]bool),
 		channels:    []mobileChannel{NewMobileNotifier(), NewTelegramNotifier()},
 		statePath:   mobileStatePath(),
+		rules:       rules,
 	}
 	nt.loadMobileState()
 	return nt
@@ -98,6 +112,10 @@ func (nt *NotifyTracker) CheckAndNotify(repo, workflow string, runs []gh.RunInfo
 		}
 
 		if tracked && prev.status == newState.status && prev.conclusion == newState.conclusion {
+			continue
+		}
+
+		if !ruleAllows(nt.rules[key], newState, time.Now()) {
 			continue
 		}
 
@@ -171,6 +189,16 @@ func buildNotification(r gh.RunInfo, prev runState, tracked bool, ns runState) (
 	}
 
 	return notification{}, false
+}
+
+func ruleAllows(r config.NotifyRules, ns runState, now time.Time) bool {
+	if r.InQuiet(now) {
+		return false
+	}
+	if r.FailuresOnly() && !(ns.status == "completed" && ns.conclusion == "failure") {
+		return false
+	}
+	return true
 }
 
 func (nt *NotifyTracker) send(n notification) {

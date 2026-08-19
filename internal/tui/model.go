@@ -159,7 +159,7 @@ func New(cfg config.Config) tea.Model {
 	ti := textinput.New()
 	ti.Placeholder = "filter (branch/workflow/repo)…"
 	ti.CharLimit = 64
-	tracker := notify.NewNotifyTracker()
+	tracker := notify.NewNotifyTracker(cfg)
 	ov := newOverview()
 	ov.mobileEnabled = tracker.IsMobileEnabled
 	return model{
