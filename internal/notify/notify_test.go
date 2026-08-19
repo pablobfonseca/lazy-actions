@@ -119,3 +119,38 @@ func TestNotifiCliArgsInteractivity(t *testing.T) {
 		t.Errorf("non-interactive args lost basic fields: %q", got)
 	}
 }
+
+func TestParseHIDIdleNanos(t *testing.T) {
+	tests := []struct {
+		name    string
+		out     string
+		want    int64
+		wantErr bool
+	}{
+		{"real ioreg line", `    | | |   "HIDIdleTime" = 423260208`, 423260208, false},
+		{"embedded in dump", "junk\n  \"HIDIdleTime\" = 90000000000\nmore", 90000000000, false},
+		{"missing", "no idle info here", 0, true},
+		{"empty", "", 0, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseHIDIdleNanos([]byte(tt.out))
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tt.wantErr)
+			}
+			if got != tt.want {
+				t.Errorf("nanos = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSystemIdleLive(t *testing.T) {
+	d, err := systemIdle()
+	if err != nil {
+		t.Fatalf("systemIdle() on macOS: %v", err)
+	}
+	if d < 0 || d > 24*time.Hour {
+		t.Errorf("implausible idle duration %v", d)
+	}
+}

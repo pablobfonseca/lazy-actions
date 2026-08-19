@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -56,14 +58,15 @@ type mobileChannel interface {
 // Workflows opted into mobile delivery additionally fan out to every configured
 // mobile channel when a run completes.
 type NotifyTracker struct {
-	mu          sync.Mutex
-	states      map[int64]runState // run ID -> last known state
-	initialized map[watchKey]bool  // skip notifications on first fetch per watch
-	notifierBin string             // path to notificli; empty falls back to osascript
-	mobile      map[watchKey]bool  // workflows opted into mobile push notifications
-	rules       map[watchKey]config.NotifyRules
-	channels    []mobileChannel
-	statePath   string // where the mobile selection is persisted
+	mu            sync.Mutex
+	states        map[int64]runState // run ID -> last known state
+	initialized   map[watchKey]bool  // skip notifications on first fetch per watch
+	notifierBin   string             // path to notificli; empty falls back to osascript
+	mobile        map[watchKey]bool  // workflows opted into mobile push notifications
+	rules         map[watchKey]config.NotifyRules
+	channels      []mobileChannel
+	statePath     string // where the mobile selection is persisted
+	mobileIdleMin time.Duration
 }
 
 func NewNotifyTracker(cfg config.Config) *NotifyTracker {
@@ -79,13 +82,14 @@ func NewNotifyTracker(cfg config.Config) *NotifyTracker {
 		}
 	}
 	nt := &NotifyTracker{
-		states:      make(map[int64]runState),
-		initialized: make(map[watchKey]bool),
-		notifierBin: bin,
-		mobile:      make(map[watchKey]bool),
-		channels:    []mobileChannel{NewMobileNotifier(), NewTelegramNotifier()},
-		statePath:   mobileStatePath(),
-		rules:       rules,
+		states:        make(map[int64]runState),
+		initialized:   make(map[watchKey]bool),
+		notifierBin:   bin,
+		mobile:        make(map[watchKey]bool),
+		channels:      []mobileChannel{NewMobileNotifier(), NewTelegramNotifier()},
+		statePath:     mobileStatePath(),
+		rules:         rules,
+		mobileIdleMin: time.Duration(cfg.MobileIdleMinutes) * time.Minute,
 	}
 	nt.loadMobileState()
 	return nt
@@ -126,7 +130,7 @@ func (nt *NotifyTracker) CheckAndNotify(repo, workflow string, runs []gh.RunInfo
 
 		if n, ok := buildNotification(r, prev, tracked, newState); ok {
 			go nt.send(n)
-			if newState.status == "completed" && nt.mobile[key] {
+			if newState.status == "completed" && nt.mobile[key] && nt.awayFromScreen() {
 				for _, ch := range nt.channels {
 					if ch.Configured() {
 						go ch.Send(n)
@@ -341,4 +345,39 @@ func osascriptScript(n notification) string {
 		script += fmt.Sprintf(` sound name %q`, n.sound)
 	}
 	return script
+}
+
+var hidIdleRe = regexp.MustCompile(`"HIDIdleTime"\s*=\s*(\d+)`)
+
+func parseHIDIdleNanos(out []byte) (int64, error) {
+	m := hidIdleRe.FindSubmatch(out)
+	if m == nil {
+		return 0, fmt.Errorf("HIDIdleTime not found in ioreg output")
+	}
+	return strconv.ParseInt(string(m[1]), 10, 64)
+}
+
+func systemIdle() (time.Duration, error) {
+	out, err := exec.Command("ioreg", "-c", "IOHIDSystem").Output()
+	if err != nil {
+		return 0, err
+	}
+	ns, err := parseHIDIdleNanos(out)
+	if err != nil {
+		return 0, err
+	}
+	return time.Duration(ns), nil
+}
+
+// awayFromScreen fails open: if idle time cannot be read, mobile delivery
+// proceeds — a missed away-notification is worse than a redundant one.
+func (nt *NotifyTracker) awayFromScreen() bool {
+	if nt.mobileIdleMin <= 0 {
+		return true
+	}
+	d, err := systemIdle()
+	if err != nil {
+		return true
+	}
+	return d >= nt.mobileIdleMin
 }
