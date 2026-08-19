@@ -96,7 +96,8 @@ func parseHHMM(s string) (int, error) {
 }
 
 type Config struct {
-	Watches []WatchEntry `yaml:"watches"`
+	Watches           []WatchEntry `yaml:"watches"`
+	MobileIdleMinutes int          `yaml:"mobile_idle_minutes"`
 }
 
 func Load() (Config, error) {
@@ -121,6 +122,9 @@ func Load() (Config, error) {
 			if err := w.Notify.validate(); err != nil {
 				return Config{}, fmt.Errorf("%s: watch %s: %w", p, w.Repo, err)
 			}
+		}
+		if cfg.MobileIdleMinutes < 0 {
+			return Config{}, fmt.Errorf("%s: mobile_idle_minutes must be >= 0, got %d", p, cfg.MobileIdleMinutes)
 		}
 		return cfg, nil
 	}

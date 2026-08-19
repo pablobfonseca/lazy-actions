@@ -128,3 +128,43 @@ func TestInQuiet(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadMobileIdleMinutes(t *testing.T) {
+	writeConfig(t, `mobile_idle_minutes: 5
+watches:
+  - repo: "o/r"
+    workflows: ["ci.yml"]
+`)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MobileIdleMinutes != 5 {
+		t.Errorf("MobileIdleMinutes = %d, want 5", cfg.MobileIdleMinutes)
+	}
+}
+
+func TestLoadMobileIdleMinutesDefault(t *testing.T) {
+	writeConfig(t, `watches:
+  - repo: "o/r"
+    workflows: ["ci.yml"]
+`)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MobileIdleMinutes != 0 {
+		t.Errorf("MobileIdleMinutes = %d, want 0", cfg.MobileIdleMinutes)
+	}
+}
+
+func TestLoadMobileIdleMinutesNegative(t *testing.T) {
+	writeConfig(t, `mobile_idle_minutes: -3
+watches:
+  - repo: "o/r"
+    workflows: ["ci.yml"]
+`)
+	if _, err := Load(); err == nil {
+		t.Error("Load() succeeded, want error for negative mobile_idle_minutes")
+	}
+}
