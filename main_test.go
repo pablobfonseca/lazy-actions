@@ -118,6 +118,29 @@ func TestResolveConfigDedupesSavedRepo(t *testing.T) {
 	}
 }
 
+func TestResolveConfigMergePreservesTopLevelFields(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Chdir(tmp)
+
+	yaml := "mobile_idle_minutes: 7\nwatches:\n  - repo: saved/repo\n    workflows: [ci.yml]\n"
+	if err := os.WriteFile("config.yaml", []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeDetectableRepo(t, "git@github.com:acme/demo.git", "ci.yml")
+
+	cfg, err := resolveConfig()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.Watches) != 2 {
+		t.Fatalf("merge path not taken, got %d watches: %+v", len(cfg.Watches), cfg)
+	}
+	if cfg.MobileIdleMinutes != 7 {
+		t.Errorf("MobileIdleMinutes: got %d, want 7", cfg.MobileIdleMinutes)
+	}
+}
+
 func writeDetectableRepo(t *testing.T, origin string, workflows ...string) {
 	t.Helper()
 	mustRun(t, "git", "init", "-q")

@@ -52,5 +52,6 @@ func resolveConfig() (config.Config, error) {
 	merged := make([]config.WatchEntry, 0, len(cfg.Watches)+1)
 	merged = append(merged, cfg.Watches...)
 	merged = append(merged, detected)
-	return config.Config{Watches: merged}, nil
+	cfg.Watches = merged
+	return cfg, nil
 }
