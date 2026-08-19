@@ -1,7 +1,12 @@
 package notify
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
+	"net/http"
+	"os"
+	"strings"
 	"testing"
 )
 
@@ -97,5 +102,38 @@ func TestTelegramPayloadTextHasNoLink(t *testing.T) {
 	p := decodePayload(t, data)
 	if want := "<b>✓ &lt;ci&gt;</b>\nPassed"; p.Text != want {
 		t.Errorf("text = %q, want %q", p.Text, want)
+	}
+}
+
+func TestTelegramLiveSend(t *testing.T) {
+	if os.Getenv("TELEGRAM_LIVE_TEST") == "" {
+		t.Skip("set TELEGRAM_LIVE_TEST=1 to send a real message")
+	}
+	token := strings.TrimSpace(os.Getenv("TELEGRAM_BOT_TOKEN"))
+	chatID := strings.TrimSpace(os.Getenv("TELEGRAM_CHAT_ID"))
+	if token == "" || chatID == "" {
+		t.Skip("TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not set")
+	}
+	n := notification{
+		title:   "✗ q5 inline-button test",
+		message: "Failed: verify buttons render",
+		openURL: "https://github.com/pablobfonseca/lazy-actions/actions",
+		actions: []notificationAction{
+			{"View Run", "https://github.com/pablobfonseca/lazy-actions/actions"},
+			{"View Failed Job", "https://github.com/pablobfonseca/lazy-actions"},
+		},
+	}
+	body, err := telegramPayload(chatID, n)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.Post("https://api.telegram.org/bot"+token+"/sendMessage", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	out, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(out), `"ok":true`) {
+		t.Fatalf("telegram rejected payload: %s", out)
 	}
 }
