@@ -102,8 +102,9 @@ Per-watch `notify` rules are optional. `only: failures` delivers only failure no
 
 **Desktop** — every run state transition (started / passed / failed / cancelled) fires a native
 notification via [NotifiCLI](https://github.com/pablobfonseca/notificli) when it is on `PATH`,
-falling back to `osascript`. Notifications carry **View Run** and, on failure, **View Failed Job**
-actions that open the relevant GitHub page.
+falling back to `osascript`. Failure notifications carry **View Run** and **View Failed Job**
+actions that open the relevant GitHub page; started / passed / cancelled notifications are
+fire-and-forget, so they leave no process waiting on a dismissal.
 
 **Mobile** — completed runs additionally fan out to any configured away-from-screen channel:
 
