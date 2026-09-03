@@ -121,6 +121,7 @@ type logViewerLoadedMsg struct {
 
 type model struct {
 	config         config.Config
+	version        string
 	mode           mode
 	watches        map[watchKey]*watchState
 	repoWorkflows  map[string][]string
@@ -151,7 +152,7 @@ type model struct {
 	toast *toast
 }
 
-func New(cfg config.Config) tea.Model {
+func New(cfg config.Config, version string) tea.Model {
 	watches := make(map[watchKey]*watchState)
 	repoWorkflows := make(map[string][]string)
 	for _, w := range cfg.Watches {
@@ -171,6 +172,7 @@ func New(cfg config.Config) tea.Model {
 	ov.mobileEnabled = tracker.IsMobileEnabled
 	return model{
 		config:        cfg,
+		version:       version,
 		watches:       watches,
 		repoWorkflows: repoWorkflows,
 		repoFetching:  make(map[string]bool),
@@ -708,6 +710,9 @@ func (m model) isRefreshing() bool {
 
 func (m model) View() string {
 	header := titleStyle.Render("  GitHub Actions Monitor")
+	if m.version != "" {
+		header += "  " + dimStyle.Render(m.version)
+	}
 	if m.isRefreshing() && !m.isInitialLoading() {
 		header += "  " + runningStyle.Render(spinnerFrames[m.spinnerIndex])
 	}

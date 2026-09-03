@@ -1,13 +1,15 @@
 BINARY := lazyactions
 BIN_DIR := bin
 INSTALL_DIR := $(HOME)/.local/bin
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS := -X main.version=$(VERSION)
 
 .PHONY: build run test vet fmt check install clean release help
 
 ## build: compile binary to ./bin/lazyactions
 build:
 	@mkdir -p $(BIN_DIR)
-	go build -o $(BIN_DIR)/$(BINARY) .
+	go build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$(BINARY) .
 
 ## run: run against ./config.yaml (or ~/.config/gh-action-monitor/config.yaml)
 run:

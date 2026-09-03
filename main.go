@@ -11,7 +11,18 @@ import (
 	"github.com/pablobfonseca/lazy-actions/internal/tui"
 )
 
+// version is overwritten at build time via -ldflags "-X main.version=...".
+var version = "dev"
+
 func main() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "--version", "-v", "version":
+			fmt.Printf("lazyactions %s\n", version)
+			return
+		}
+	}
+
 	loadDotEnv()
 
 	cfg, err := resolveConfig()
@@ -20,7 +31,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	p := tea.NewProgram(tui.New(cfg), tea.WithAltScreen())
+	p := tea.NewProgram(tui.New(cfg, version), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 		os.Exit(1)

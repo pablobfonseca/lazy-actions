@@ -47,6 +47,12 @@ make build      # produces ./bin/lazyactions
 make install    # copies it to ~/.local/bin/lazyactions
 ```
 
+Check what you have with `lazyactions --version`. Homebrew and `make build`
+report the tag; `go install` reports `dev`, since it does not set the build
+flag that stamps the version in.
+
+See [CHANGELOG.md](CHANGELOG.md) for what changed between releases.
+
 ## Configuration
 
 `lazy-actions` resolves what to watch from two places:
