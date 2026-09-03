@@ -254,7 +254,6 @@ func TestLoadSharedPathWithoutWatchesUsesXDGConfig(t *testing.T) {
 	}
 }
 
-// Nothing else owns the XDG filename, so it stays strict even without watches.
 func nonMappingDocs() []struct{ name, yaml string } {
 	return []struct{ name, yaml string }{
 		{"bare list", "- a\n- b\n"},
@@ -298,6 +297,7 @@ func TestLoadXDGNonMappingIsError(t *testing.T) {
 	}
 }
 
+// Nothing else owns the XDG filename, so it stays strict even without watches.
 func TestLoadXDGWithoutWatchesIsError(t *testing.T) {
 	writeXDGConfig(t, "server:\n  port: 8080\n")
 
