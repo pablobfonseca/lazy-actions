@@ -105,6 +105,92 @@ func TestTelegramPayloadTextHasNoLink(t *testing.T) {
 	}
 }
 
+func TestTelegramPayloadSkipsInvalidButtons(t *testing.T) {
+	tests := []struct {
+		name    string
+		actions []notificationAction
+		want    []tgDecodedButton
+	}{
+		{
+			name:    "no actions",
+			actions: nil,
+			want:    nil,
+		},
+		{
+			name: "all urls present",
+			actions: []notificationAction{
+				{"View Run", "https://example.com/run/1"},
+				{"View Failed Job", "https://example.com/job/1"},
+			},
+			want: []tgDecodedButton{
+				{"View Run", "https://example.com/run/1"},
+				{"View Failed Job", "https://example.com/job/1"},
+			},
+		},
+		{
+			name: "one empty url dropped",
+			actions: []notificationAction{
+				{"View Run", "https://example.com/run/1"},
+				{"View Failed Job", "   "},
+				{"View Artifacts", "https://example.com/artifacts/1"},
+			},
+			want: []tgDecodedButton{
+				{"View Run", "https://example.com/run/1"},
+				{"View Artifacts", "https://example.com/artifacts/1"},
+			},
+		},
+		{
+			name: "empty label dropped",
+			actions: []notificationAction{
+				{"", "https://example.com/run/1"},
+				{"View Failed Job", "https://example.com/job/1"},
+			},
+			want: []tgDecodedButton{
+				{"View Failed Job", "https://example.com/job/1"},
+			},
+		},
+		{
+			name: "every url empty",
+			actions: []notificationAction{
+				{"View Run", ""},
+				{"View Failed Job", " "},
+			},
+			want: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data, err := telegramPayload("42", notification{title: "t", message: "m", actions: tt.actions})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			var raw map[string]json.RawMessage
+			if err := json.Unmarshal(data, &raw); err != nil {
+				t.Fatal(err)
+			}
+			_, hasMarkup := raw["reply_markup"]
+			if hasMarkup != (len(tt.want) > 0) {
+				t.Fatalf("reply_markup present = %v, want %v (payload %s)", hasMarkup, len(tt.want) > 0, data)
+			}
+			if !hasMarkup {
+				return
+			}
+
+			kb := decodePayload(t, data).ReplyMarkup.InlineKeyboard
+			if len(kb) != len(tt.want) {
+				t.Fatalf("keyboard = %v, want %d rows", kb, len(tt.want))
+			}
+			for i, want := range tt.want {
+				if len(kb[i]) != 1 || kb[i][0] != want {
+					t.Errorf("row %d = %v, want [%v]", i, kb[i], want)
+				}
+			}
+		})
+	}
+}
+
 func TestTelegramLiveSend(t *testing.T) {
 	if os.Getenv("TELEGRAM_LIVE_TEST") == "" {
 		t.Skip("set TELEGRAM_LIVE_TEST=1 to send a real message")

@@ -71,11 +71,15 @@ func telegramPayload(chatID string, n notification) ([]byte, error) {
 	if len(buttons) == 0 && n.openURL != "" {
 		buttons = []notificationAction{{"View Run", n.openURL}}
 	}
-	if len(buttons) > 0 {
-		rows := make([][]telegramButton, 0, len(buttons))
-		for _, a := range buttons {
-			rows = append(rows, []telegramButton{{a.label, a.url}})
+	rows := make([][]telegramButton, 0, len(buttons))
+	for _, a := range buttons {
+		label, url := strings.TrimSpace(a.label), strings.TrimSpace(a.url)
+		if label == "" || url == "" {
+			continue
 		}
+		rows = append(rows, []telegramButton{{label, url}})
+	}
+	if len(rows) > 0 {
 		payload["reply_markup"] = map[string]any{"inline_keyboard": rows}
 	}
 
