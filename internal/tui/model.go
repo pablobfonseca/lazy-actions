@@ -308,13 +308,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case claudeLogsMsg:
-		if msg.err != nil {
-			m.setToast(toastError, msg.err.Error())
+		if msg.err != nil || msg.run == nil {
+			removeClaudeLog(msg.logPath)
+			text := "could not prepare failed job logs"
+			if msg.err != nil {
+				text = msg.err.Error()
+			}
+			m.setToast(toastError, text)
 			return m, nil
 		}
 		return m, execClaudeCmd(*msg.run, msg.logPath)
 
 	case claudeDoneMsg:
+		removeClaudeLog(msg.logPath)
 		if msg.err != nil {
 			m.setToast(toastError, "claude exited: "+msg.err.Error())
 		} else {
