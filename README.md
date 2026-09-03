@@ -49,16 +49,20 @@ make install    # copies it to ~/.local/bin/lazyactions
 
 ## Configuration
 
-`lazy-actions` resolves what to watch from two places, in order:
+`lazy-actions` resolves what to watch from two places:
 
-1. **Saved config** at `~/.config/gh-action-monitor/config.yaml` (or `./config.yaml` for backward compatibility).
-2. **Auto-detect** from the current directory: `git remote get-url origin` → `owner/repo`, plus every `.github/workflows/*.{yml,yaml}` file.
+1. **Saved config**: `./config.yaml` in the current directory (legacy), falling back to `~/.config/gh-action-monitor/config.yaml`.
+2. **Auto-detect** from the current directory: `git remote get-url origin` → `owner/repo`, plus every `.github/workflows/*.{yml,yaml}` file. Both are required; a repo with no workflow files is not detectable.
 
-Saved config always wins; auto-detection is a fallback, never merged in:
+Both sources are always merged, saved watches first:
 
-- Saved config found → used as-is, and auto-detection never runs.
-- No saved config, but CWD is a GitHub repo → the auto-detected entry is used as the whole config.
-- Neither → startup fails with both the config error and the auto-detect error.
+- Saved config and CWD repo → the detected entry is appended to the saved watches. If the detected repo is already in the config, the saved entry wins and is used untouched (your `workflows` and `notify` rules are kept, nothing is appended).
+- Saved config, CWD is not a GitHub repo → the saved watches are used as-is.
+- No config file, but CWD is a GitHub repo → the detected entry is the whole config.
+- No config file and no CWD repo → startup fails with both errors.
+- Config file present but unreadable, unparseable, or invalid → startup fails with that error, so a typo *inside* your watch list can never silently drop it. A missing or misspelled top-level `watches` key in the legacy `./config.yaml` is the one exception, described below.
+
+`./config.yaml` is not a name this tool owns, so a document there that is not a mapping with a `watches` key (another tool's settings, a bare list, an empty file) is skipped and the search continues; one that *has* a `watches` key is validated strictly. `~/.config/gh-action-monitor/config.yaml` is always validated strictly, a missing `watches` key included.
 
 ### Saved config format
 
@@ -82,7 +86,7 @@ Workflow names are the file names under `.github/workflows/` in each repo.
 
 Per-watch `notify` rules are optional. `only: failures` delivers only failure notifications (started/success/cancelled are suppressed, on desktop and mobile alike). `quiet` windows are `HH:MM-HH:MM` in local time, may wrap midnight, and silence all notifications for that watch while active; transitions that happen during a quiet window are dropped, not queued.
 
-`mobile_idle_minutes` gates the mobile channels (brrr.now, Telegram) on away-from-screen detection: pushes are sent only when macOS reports at least that many minutes without keyboard or mouse input (`HIDIdleTime`). `0` or omitted sends them regardless. Desktop notifications are never gated.
+`mobile_idle_minutes` gates the mobile channels (brrr.now, Telegram) on away-from-screen detection: pushes are sent only when macOS reports at least that many minutes without keyboard or mouse input (`HIDIdleTime`). `0` or omitted sends them regardless. Desktop notifications are never gated. The value must be a whole number of minutes between `0` and `1440`; anything else fails at startup.
 
 ## Keybindings
 
@@ -95,6 +99,7 @@ Per-watch `notify` rules are optional. `only: failures` delivers only failure no
 | `r`            | normal      | Refresh all repos now                   |
 | `F`            | normal      | Re-run failed jobs (confirm)            |
 | `x`            | normal      | Cancel run (confirm)                    |
+| `p`            | normal      | Approve pending deployment (confirm)    |
 | `d`            | normal      | Download artifacts (prompts for path)   |
 | `y` / `Y`      | normal      | Copy run URL / commit SHA               |
 | `n`            | normal      | Toggle mobile notifications for workflow |

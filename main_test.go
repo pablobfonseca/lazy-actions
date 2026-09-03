@@ -171,6 +171,95 @@ func TestResolveConfigBothFail(t *testing.T) {
 	}
 }
 
+// A config file that exists but does not load is a hard error: falling back to
+// auto-detection here would silently drop every saved watch.
+func TestResolveConfigBrokenConfigIsError(t *testing.T) {
+	tests := []struct {
+		name, yaml string
+	}{
+		{"malformed yaml", "watches:\n  - repo: \"saved/repo\"\n   workflows: [\n"},
+		{"no watches", "watches: []\n"},
+		{"bad notify rule", "watches:\n  - repo: \"saved/repo\"\n    notify:\n      only: sometimes\n"},
+		{"fractional idle minutes", "mobile_idle_minutes: 2.5\nwatches:\n  - repo: \"saved/repo\"\n"},
+		{"out of range idle minutes", "mobile_idle_minutes: 999999999\nwatches:\n  - repo: \"saved/repo\"\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			t.Setenv("HOME", tmp)
+			t.Chdir(tmp)
+
+			if err := os.WriteFile("config.yaml", []byte(tt.yaml), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			writeDetectableRepo(t, "git@github.com:acme/demo.git", "ci.yml")
+
+			cfg, err := resolveConfig()
+			if err == nil {
+				t.Fatalf("resolveConfig() succeeded with %+v, want error", cfg)
+			}
+			if len(cfg.Watches) != 0 {
+				t.Errorf("watches silently replaced by auto-detection: %+v", cfg.Watches)
+			}
+		})
+	}
+}
+
+// An unrelated tool's ./config.yaml must not fail startup: the bare name is
+// shared, so anything without a watches key is somebody else's file.
+func TestResolveConfigIgnoresForeignLocalConfig(t *testing.T) {
+	tests := []struct {
+		name, yaml string
+	}{
+		{"foreign mapping", "server:\n  port: 8080\n"},
+		{"bare list", "- a\n- b\n"},
+		{"bare scalar", "42\n"},
+		{"empty file", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			t.Setenv("HOME", tmp)
+			t.Chdir(tmp)
+
+			if err := os.WriteFile("config.yaml", []byte(tt.yaml), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			writeDetectableRepo(t, "git@github.com:acme/demo.git", "ci.yml")
+
+			cfg, err := resolveConfig()
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(cfg.Watches) != 1 || cfg.Watches[0].Repo != "acme/demo" {
+				t.Fatalf("want auto-detected watch only, got %+v", cfg.Watches)
+			}
+		})
+	}
+}
+
+func TestResolveConfigUnreadableConfigIsError(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads any file regardless of mode")
+	}
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Chdir(tmp)
+
+	if err := os.WriteFile("config.yaml", []byte("watches:\n  - repo: \"saved/repo\"\n"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	writeDetectableRepo(t, "git@github.com:acme/demo.git", "ci.yml")
+
+	cfg, err := resolveConfig()
+	if err == nil {
+		t.Fatalf("resolveConfig() succeeded with %+v, want error", cfg)
+	}
+	if len(cfg.Watches) != 0 {
+		t.Errorf("watches silently replaced by auto-detection: %+v", cfg.Watches)
+	}
+}
+
 func mustRun(t *testing.T, name string, args ...string) {
 	t.Helper()
 	if out, err := exec.Command(name, args...).CombinedOutput(); err != nil {

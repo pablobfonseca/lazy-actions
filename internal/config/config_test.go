@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -130,41 +131,214 @@ func TestInQuiet(t *testing.T) {
 }
 
 func TestLoadMobileIdleMinutes(t *testing.T) {
-	writeConfig(t, `mobile_idle_minutes: 5
-watches:
+	tests := []struct {
+		name    string
+		value   string
+		want    int
+		wantErr bool
+	}{
+		{"valid", "mobile_idle_minutes: 5\n", 5, false},
+		{"omitted", "", 0, false},
+		{"zero", "mobile_idle_minutes: 0\n", 0, false},
+		{"upper bound", "mobile_idle_minutes: 1440\n", 1440, false},
+		{"negative", "mobile_idle_minutes: -3\n", 0, true},
+		{"fractional", "mobile_idle_minutes: 2.5\n", 0, true},
+		{"over bound", "mobile_idle_minutes: 1441\n", 0, true},
+		{"duration overflow", "mobile_idle_minutes: 999999999\n", 0, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			writeConfig(t, tt.value+`watches:
   - repo: "o/r"
     workflows: ["ci.yml"]
 `)
+			cfg, err := Load()
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("Load() = %d, want error", cfg.MobileIdleMinutes)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.MobileIdleMinutes != tt.want {
+				t.Errorf("MobileIdleMinutes = %d, want %d", cfg.MobileIdleMinutes, tt.want)
+			}
+		})
+	}
+}
+
+func writeXDGConfig(t *testing.T, yaml string) string {
+	t.Helper()
+	dir := t.TempDir()
+	xdg := filepath.Join(dir, ".config", "gh-action-monitor")
+	if err := os.MkdirAll(xdg, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(xdg, "config.yaml"), []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	t.Setenv("HOME", dir)
+	return dir
+}
+
+func TestLoadUnreadableConfig(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads any file regardless of mode")
+	}
+	dir := t.TempDir()
+	t.Chdir(dir)
+	t.Setenv("HOME", dir)
+	if err := os.WriteFile("config.yaml", []byte("watches:\n  - repo: \"o/r\"\n"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() succeeded on an unreadable config, want error")
+	}
+	if errors.Is(err, ErrNotFound) {
+		t.Errorf("unreadable config reported as ErrNotFound: %v", err)
+	}
+}
+
+func TestLoadConfigIsDirectory(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	t.Setenv("HOME", dir)
+	if err := os.Mkdir("config.yaml", 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() succeeded with config.yaml as a directory, want error")
+	}
+	if errors.Is(err, ErrNotFound) {
+		t.Errorf("directory reported as ErrNotFound: %v", err)
+	}
+}
+
+// ./config.yaml is not namespaced, so an unrelated tool's file with no watches
+// key must be skipped rather than fail startup.
+func TestLoadSharedPathWithoutWatchesFallsThrough(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	t.Setenv("HOME", dir)
+	if err := os.WriteFile("config.yaml", []byte("server:\n  port: 8080\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Load(); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Load() error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestLoadSharedPathWithoutWatchesUsesXDGConfig(t *testing.T) {
+	writeXDGConfig(t, `watches:
+  - repo: "o/r"
+    workflows: ["ci.yml"]
+`)
+	if err := os.WriteFile("config.yaml", []byte("server:\n  port: 8080\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
 	cfg, err := Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.MobileIdleMinutes != 5 {
-		t.Errorf("MobileIdleMinutes = %d, want 5", cfg.MobileIdleMinutes)
+	if len(cfg.Watches) != 1 || cfg.Watches[0].Repo != "o/r" {
+		t.Fatalf("XDG config not used: %+v", cfg)
 	}
 }
 
-func TestLoadMobileIdleMinutesDefault(t *testing.T) {
-	writeConfig(t, `watches:
-  - repo: "o/r"
-    workflows: ["ci.yml"]
-`)
-	cfg, err := Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.MobileIdleMinutes != 0 {
-		t.Errorf("MobileIdleMinutes = %d, want 0", cfg.MobileIdleMinutes)
+// Nothing else owns the XDG filename, so it stays strict even without watches.
+func nonMappingDocs() []struct{ name, yaml string } {
+	return []struct{ name, yaml string }{
+		{"bare list", "- a\n- b\n"},
+		{"bare string", "just a string\n"},
+		{"bare scalar", "42\n"},
+		{"empty file", ""},
+		{"null document", "null\n"},
 	}
 }
 
-func TestLoadMobileIdleMinutesNegative(t *testing.T) {
-	writeConfig(t, `mobile_idle_minutes: -3
-watches:
-  - repo: "o/r"
-    workflows: ["ci.yml"]
-`)
-	if _, err := Load(); err == nil {
-		t.Error("Load() succeeded, want error for negative mobile_idle_minutes")
+func TestLoadSharedPathNonMappingFallsThrough(t *testing.T) {
+	for _, tt := range nonMappingDocs() {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Chdir(dir)
+			t.Setenv("HOME", dir)
+			if err := os.WriteFile("config.yaml", []byte(tt.yaml), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			if _, err := Load(); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("Load() error = %v, want ErrNotFound", err)
+			}
+		})
+	}
+}
+
+func TestLoadXDGNonMappingIsError(t *testing.T) {
+	for _, tt := range nonMappingDocs() {
+		t.Run(tt.name, func(t *testing.T) {
+			writeXDGConfig(t, tt.yaml)
+
+			_, err := Load()
+			if err == nil {
+				t.Fatal("Load() succeeded on a non-mapping XDG config, want error")
+			}
+			if errors.Is(err, ErrNotFound) {
+				t.Errorf("non-mapping XDG config reported as ErrNotFound: %v", err)
+			}
+		})
+	}
+}
+
+func TestLoadXDGWithoutWatchesIsError(t *testing.T) {
+	writeXDGConfig(t, "server:\n  port: 8080\n")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() succeeded on an XDG config with no watches, want error")
+	}
+	if errors.Is(err, ErrNotFound) {
+		t.Errorf("XDG config with no watches reported as ErrNotFound: %v", err)
+	}
+}
+
+func TestLoadMissingConfig(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	t.Setenv("HOME", dir)
+
+	_, err := Load()
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Load() error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestLoadBrokenConfigIsNotNotFound(t *testing.T) {
+	tests := []struct {
+		name, yaml string
+	}{
+		{"malformed yaml", "watches:\n  - repo: \"o/r\"\n   workflows: [\n"},
+		{"no watches", "watches: []\n"},
+		{"bad idle minutes", "mobile_idle_minutes: 2.5\nwatches:\n  - repo: \"o/r\"\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			writeConfig(t, tt.yaml)
+			_, err := Load()
+			if err == nil {
+				t.Fatal("Load() succeeded, want error")
+			}
+			if errors.Is(err, ErrNotFound) {
+				t.Errorf("broken config reported as ErrNotFound: %v", err)
+			}
+		})
 	}
 }

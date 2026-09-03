@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -29,9 +30,13 @@ func main() {
 // resolveConfig merges the saved config with auto-detection from the current
 // directory: the detected entry is appended to the saved watches unless its
 // repo is already watched, in which case the saved entry wins untouched.
-// Either source may be missing; only when both fail is it an error.
+// A missing config file falls back to auto-detection; a config file that
+// exists but is invalid is an error, never a silent fallback.
 func resolveConfig() (config.Config, error) {
 	cfg, err := config.Load()
+	if err != nil && !errors.Is(err, config.ErrNotFound) {
+		return config.Config{}, err
+	}
 	detected, detectErr := config.DetectFromCWD()
 
 	switch {

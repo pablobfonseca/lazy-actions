@@ -1,7 +1,9 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -100,34 +102,87 @@ type Config struct {
 	MobileIdleMinutes int          `yaml:"mobile_idle_minutes"`
 }
 
+// ErrNotFound reports the absence of a config file, as opposed to one that
+// exists but is unreadable: callers fall back to auto-detection only for this.
+var ErrNotFound = errors.New("config.yaml not found in current directory or ~/.config/gh-action-monitor/")
+
+const maxMobileIdleMinutes = 24 * 60
+
 func Load() (Config, error) {
-	paths := []string{
-		"config.yaml",
-		filepath.Join(os.Getenv("HOME"), ".config", "gh-action-monitor", "config.yaml"),
+	paths := []struct {
+		path string
+		// The bare ./config.yaml name is not ours alone, so a document there
+		// that is not a mapping with a watches key belongs to another tool
+		// and is skipped rather than failing startup.
+		shared bool
+	}{
+		{"config.yaml", true},
+		{filepath.Join(os.Getenv("HOME"), ".config", "gh-action-monitor", "config.yaml"), false},
 	}
 
-	for _, p := range paths {
-		data, err := os.ReadFile(p)
+	for _, src := range paths {
+		data, err := os.ReadFile(src.path)
 		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			return Config{}, fmt.Errorf("reading %s: %w", src.path, err)
+		}
+		var doc yaml.Node
+		if err := yaml.Unmarshal(data, &doc); err != nil {
+			return Config{}, fmt.Errorf("parsing %s: %w", src.path, err)
+		}
+		root := documentRoot(&doc)
+		if root == nil || root.Kind != yaml.MappingNode {
+			if src.shared {
+				continue
+			}
+			return Config{}, fmt.Errorf("parsing %s: want a mapping with a watches key", src.path)
+		}
+		var raw rawConfig
+		if err := root.Decode(&raw); err != nil {
+			return Config{}, fmt.Errorf("parsing %s: %w", src.path, err)
+		}
+		if src.shared && raw.Watches.IsZero() {
 			continue
 		}
 		var cfg Config
-		if err := yaml.Unmarshal(data, &cfg); err != nil {
-			return Config{}, fmt.Errorf("parsing %s: %w", p, err)
+		if err := root.Decode(&cfg); err != nil {
+			return Config{}, fmt.Errorf("parsing %s: %w", src.path, err)
 		}
 		if len(cfg.Watches) == 0 {
-			return Config{}, fmt.Errorf("no watches defined in %s", p)
+			return Config{}, fmt.Errorf("no watches defined in %s", src.path)
 		}
 		for _, w := range cfg.Watches {
 			if err := w.Notify.validate(); err != nil {
-				return Config{}, fmt.Errorf("%s: watch %s: %w", p, w.Repo, err)
+				return Config{}, fmt.Errorf("%s: watch %s: %w", src.path, w.Repo, err)
 			}
 		}
-		if cfg.MobileIdleMinutes < 0 {
-			return Config{}, fmt.Errorf("%s: mobile_idle_minutes must be >= 0, got %d", p, cfg.MobileIdleMinutes)
+		if raw.MobileIdleMinutes.Tag == "!!float" {
+			return Config{}, fmt.Errorf("%s: mobile_idle_minutes must be written as an integer, got %s", src.path, raw.MobileIdleMinutes.Value)
+		}
+		if cfg.MobileIdleMinutes < 0 || cfg.MobileIdleMinutes > maxMobileIdleMinutes {
+			return Config{}, fmt.Errorf("%s: mobile_idle_minutes must be between 0 and %d (24h), got %d", src.path, maxMobileIdleMinutes, cfg.MobileIdleMinutes)
 		}
 		return cfg, nil
 	}
 
-	return Config{}, fmt.Errorf("config.yaml not found in current directory or ~/.config/gh-action-monitor/")
+	return Config{}, ErrNotFound
+}
+
+// documentRoot returns the single document's top-level node, or nil for an
+// empty file.
+func documentRoot(doc *yaml.Node) *yaml.Node {
+	if doc.Kind == yaml.DocumentNode && len(doc.Content) == 1 {
+		return doc.Content[0]
+	}
+	return nil
+}
+
+// rawConfig keeps the undecoded scalars: yaml.v3 truncates a float into an int
+// field without complaining, and an absent watches key is indistinguishable
+// from an empty one after decoding into Config.
+type rawConfig struct {
+	Watches           yaml.Node `yaml:"watches"`
+	MobileIdleMinutes yaml.Node `yaml:"mobile_idle_minutes"`
 }
