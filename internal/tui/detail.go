@@ -54,6 +54,9 @@ func (d *detailModel) View() string {
 	} else {
 		b.WriteString(kv("elapsed", formatDuration(time.Since(r.Run.RunStartedAt))))
 	}
+	if r.Run.Status == "waiting" {
+		b.WriteString(kv("status", awaitingApprovalStyle.Render("awaiting approval")))
+	}
 
 	// Jobs
 	b.WriteString("\n")

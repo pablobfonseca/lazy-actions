@@ -34,6 +34,12 @@ var (
 			Foreground(lipgloss.AdaptiveColor{Light: "243", Dark: "245"}).
 			Italic(true)
 
+	// Bold as well as orange: this is the one run state that needs the user to
+	// act, and hue alone sits too close to runningStyle's amber.
+	awaitingApprovalStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.AdaptiveColor{Light: "166", Dark: "208"}).
+				Bold(true)
+
 	sectionLabelStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.AdaptiveColor{Light: "243", Dark: "245"}).
 				Bold(true)

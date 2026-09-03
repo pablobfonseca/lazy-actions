@@ -239,7 +239,9 @@ func (o *overviewModel) renderLine(r gh.RunInfo, spinnerIndex int) string {
 
 func lineIconAndStyle(r gh.RunInfo, spinnerIndex int) (string, lipgloss.Style) {
 	switch {
-	case r.Run.Status == "in_progress", r.Run.Status == "waiting":
+	case r.Run.Status == "waiting":
+		return "⊙", awaitingApprovalStyle
+	case r.Run.Status == "in_progress":
 		return spinnerFrames[spinnerIndex], runningStyle
 	case r.Run.Status == "completed" && r.Run.Conclusion == "success":
 		return "✓", successStyle

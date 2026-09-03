@@ -28,6 +28,7 @@ var keyMap = []keySection{
 			{Keys: []string{"r"}, Desc: "refresh now"},
 			{Keys: []string{"F"}, Desc: "re-run failed jobs"},
 			{Keys: []string{"x"}, Desc: "cancel run"},
+			{Keys: []string{"p"}, Desc: "approve pending deployment"},
 			{Keys: []string{"d"}, Desc: "download artifacts"},
 			{Keys: []string{"y"}, Desc: "copy run URL"},
 			{Keys: []string{"Y"}, Desc: "copy commit SHA"},

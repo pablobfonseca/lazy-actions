@@ -42,3 +42,15 @@ func TestOverviewCursorFallsBackWhenSelectedGone(t *testing.T) {
 		t.Errorf("fallback: got %d, want 10", got)
 	}
 }
+
+func TestLineIconDistinguishesWaitingFromRunning(t *testing.T) {
+	waitingIcon, _ := lineIconAndStyle(gh.RunInfo{Run: gh.WorkflowRun{Status: "waiting"}}, 0)
+	runningIcon, _ := lineIconAndStyle(gh.RunInfo{Run: gh.WorkflowRun{Status: "in_progress"}}, 0)
+
+	if waitingIcon == runningIcon {
+		t.Errorf("waiting and in_progress share icon %q; a gated run is indistinguishable from a running one", waitingIcon)
+	}
+	if waitingIcon == "" {
+		t.Error("waiting run has no icon")
+	}
+}

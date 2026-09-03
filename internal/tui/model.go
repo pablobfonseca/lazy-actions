@@ -88,12 +88,19 @@ type actionKind int
 const (
 	actionRerunFailed actionKind = iota
 	actionCancel
+	actionApproveDeployment
 )
 
 type actionResultMsg struct {
 	kind actionKind
 	repo string
 	err  error
+}
+
+type pendingDeploymentsMsg struct {
+	run     gh.RunInfo
+	pending []gh.PendingDeployment
+	err     error
 }
 
 type downloadResultMsg struct {
@@ -319,6 +326,34 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, execClaudeCmd(*msg.run, msg.logPath)
 
+	case pendingDeploymentsMsg:
+		// Update and View both route to the log viewer, then help, before they
+		// consult m.confirm, so a modal opened while one of those owns the screen
+		// is neither drawn nor answerable and surfaces later with no context.
+		// Approval is irreversible, so drop the reply rather than leave it pending.
+		if m.mode != modeNormal || m.help.IsOpen() || m.confirm.IsOpen() {
+			return m, nil
+		}
+		if msg.err != nil {
+			text := "could not check pending deployments"
+			if errors.Is(msg.err, gh.ErrRateLimit) {
+				text = "rate limited"
+			}
+			m.setToast(toastError, text)
+			return m, nil
+		}
+		ids, names, reason := approvableEnvironments(msg.pending)
+		if reason != "" {
+			m.setToast(toastError, reason)
+			return m, nil
+		}
+		m.confirm.Open(
+			fmt.Sprintf("Approve deployment to %s for %s/%s #%d on %s?",
+				strings.Join(names, ", "), msg.run.Repo, msg.run.Workflow, msg.run.Run.ID, msg.run.Run.HeadBranch),
+			approveDeploymentsCmd(msg.run.Repo, msg.run.Run.ID, ids),
+		)
+		return m, nil
+
 	case claudeDoneMsg:
 		removeClaudeLog(msg.logPath)
 		if msg.err != nil {
@@ -357,6 +392,8 @@ func toastForActionResult(msg actionResultMsg) (toastLevel, string) {
 		return toastSuccess, "re-run queued"
 	case actionCancel:
 		return toastSuccess, "cancel requested"
+	case actionApproveDeployment:
+		return toastSuccess, "deployment approved"
 	}
 	return toastInfo, ""
 }
@@ -518,6 +555,17 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			cancelRunCmd(r.Repo, r.Run.ID),
 		)
 		return m, nil
+	case "p":
+		r, ok := m.overview.Selected()
+		if !ok {
+			return m, nil
+		}
+		if !isApprovable(r.Run) {
+			m.setToast(toastError, "run is not awaiting approval")
+			return m, nil
+		}
+		m.setToast(toastInfo, "checking pending deployments…")
+		return m, pendingDeploymentsCmd(r)
 	case "d":
 		r, ok := m.overview.Selected()
 		if !ok {
@@ -837,6 +885,51 @@ func rerunFailedCmd(repo string, runID int64) tea.Cmd {
 func cancelRunCmd(repo string, runID int64) tea.Cmd {
 	return func() tea.Msg {
 		return actionResultMsg{kind: actionCancel, repo: repo, err: gh.CancelRun(repo, runID)}
+	}
+}
+
+// isApprovable matches the status GitHub uses while a run is held on an
+// environment protection rule. The authoritative answer is the pending
+// deployments lookup; this only avoids spending a call on runs that cannot
+// possibly be gated.
+func isApprovable(run gh.WorkflowRun) bool {
+	return run.Status == "waiting"
+}
+
+// approvableEnvironments splits a pending deployments response into the gates
+// this user can clear. An empty reason means there is something to approve;
+// otherwise reason is the toast explaining why there is not.
+func approvableEnvironments(pending []gh.PendingDeployment) (ids []int64, names []string, reason string) {
+	if len(pending) == 0 {
+		return nil, nil, "no pending deployments for this run"
+	}
+	for _, p := range pending {
+		if !p.CurrentUserCanApprove {
+			continue
+		}
+		ids = append(ids, p.Environment.ID)
+		names = append(names, p.Environment.Name)
+	}
+	if len(ids) == 0 {
+		return nil, nil, "you are not a required reviewer for this run"
+	}
+	return ids, names, ""
+}
+
+func pendingDeploymentsCmd(r gh.RunInfo) tea.Cmd {
+	return func() tea.Msg {
+		pending, err := gh.FetchPendingDeployments(r.Repo, r.Run.ID)
+		return pendingDeploymentsMsg{run: r, pending: pending, err: err}
+	}
+}
+
+func approveDeploymentsCmd(repo string, runID int64, environmentIDs []int64) tea.Cmd {
+	return func() tea.Msg {
+		return actionResultMsg{
+			kind: actionApproveDeployment,
+			repo: repo,
+			err:  gh.ApprovePendingDeployments(repo, runID, environmentIDs),
+		}
 	}
 }
 
