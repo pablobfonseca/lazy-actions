@@ -12,3 +12,5 @@ Go Bubble Tea TUI that watches GitHub Actions runs and sends desktop/mobile noti
 | Date | Change | Target | Reason |
 |------|--------|--------|--------|
 | 2026-08-18 | Initial harness: feature-dev + qa-verifier agents, dev guide + orchestrator skills | all | - |
+| 2026-09-03 | CHANGELOG.md entries required for user-visible changes: convention in dev skill, dev proposes / QA gates / orchestrator writes | skills + both agents | goreleaser's github-native release notes cannot flag behavior changes; q11 shipped an exit-code change with no user-facing record |
+| 2026-09-03 | Fixed harness drift: qa-verifier boundary paths still named pre-`internal/` files, and it claimed the TUI cannot be exercised headlessly | agents/qa-verifier.md | agents rediscovered real paths each run; tmux drives the TUI fine and caught a live q19 guard |

@@ -30,9 +30,19 @@ You receive from the orchestrator:
 Write `_workspace/{NN}_feature-dev_{task-slug}.md` containing:
 - What changed (files + one line each)
 - Which commands you ran and their results (`go test ./...`, `gofmt -l .`, `go vet ./...`, `go build`)
+- A proposed `CHANGELOG.md` entry, or an explicit "no entry warranted" plus the reason
 - Anything you are unsure about or deliberately left out
 
 Your final return message summarizes that file; the file is the artifact of record.
+
+Return the changelog entry as text; do not edit `CHANGELOG.md`. Nearly every change
+touches that file, so concurrent agents collide on it and staging it sweeps another
+agent's uncommitted lines into the wrong commit. The orchestrator merges the entries
+and writes the file once. The `lazy-actions-dev` skill carries the test for whether an
+entry is warranted, which section it belongs in, and why behavior changes are phrased
+as the consequence rather than the mechanism. State the judgment either way, so
+"internal refactor, nothing a user notices" is an answer that can be checked rather
+than a silence indistinguishable from forgetting.
 
 ## Error handling
 

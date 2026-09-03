@@ -48,6 +48,48 @@ Data flow: `resolveConfig` → `tui.New` → per-repo `repoFetchCmd` (async tea.
 - Errors at startup print to stderr and exit; errors during operation degrade gracefully (skip the repo, show rate-limit state) rather than crashing the TUI.
 - Caching: check `BranchCache`/`JobCache` before adding API calls in the fetch path; GitHub rate limits are the scarce resource.
 
+## Changelog
+
+`CHANGELOG.md` is the curated record. goreleaser generates GitHub release notes
+from commit subjects (`changelog: use: github-native`), so the file exists to carry
+what generated notes cannot: which changes alter behavior someone already depends on.
+That is its whole job, and it is why the test below is about the reader, not about
+whether you touched code.
+
+**An entry is warranted when a user could notice the change without reading the diff:**
+
+| Warrants an entry | Section | Does not warrant one |
+|---|---|---|
+| New or changed keybinding, flag, or command | Added / Changed | Internal refactor with identical behavior |
+| Config schema, validation, or resolution change | Changed | Test-only changes, new test coverage |
+| A failure mode a user hit, now fixed | Fixed | Comment moves, formatting, renames |
+| Notification content, timing, or delivery | Changed / Fixed | Dependency bumps with no visible effect |
+| Anything altering the trust boundary or an injection surface | Security | Workspace artifacts, harness edits |
+
+When it is genuinely borderline, write the entry. A reader skipping one line costs
+nothing; a silent behavior change costs them a debugging session.
+
+**Behavior changes get the consequence, not the mechanism.** A reader scanning before
+upgrading needs to know what will break, in their terms. "resolveConfig now uses
+errors.Is on a sentinel" tells them nothing. "A broken config file now fails startup
+instead of being ignored, where it previously dropped your whole watch list and exited
+0" tells them whether to care. Name the old behavior, since that is the one they have.
+
+**Entries go under `## [Unreleased]`**, in the Keep a Changelog sections already in the
+file (Added, Changed, Fixed, Security). Do not invent sections, do not add a version
+heading; tagging a release is a human decision and moving `[Unreleased]` under a new
+version happens then. Prose style follows the repo's: no em-dashes, no filler.
+
+**Accepted residuals belong in the entry.** If a fix leaves a known gap (q11 left a
+typo'd key in the shared config path falling through silently), say so where the reader
+will see it. A changelog that only lists wins teaches readers not to trust it.
+
+**Parallel work: the orchestrator owns this file.** `CHANGELOG.md` is touched by nearly
+every change, so concurrent agents collide on it, and a staged shared file silently
+sweeps another agent's uncommitted lines into the wrong commit. When agents run in
+parallel, each one returns its proposed entry as text in its report and the orchestrator
+writes the file. A single agent working alone edits it directly.
+
 ## Testing conventions
 
 - Table-driven tests; isolation via `t.TempDir()`, `t.Setenv()`, `t.Chdir()` (see `internal/config/autodetect_test.go`, `main_test.go` — they build real temp git repos).
