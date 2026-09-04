@@ -15,7 +15,7 @@ jobs:
         run: sleep 45
       - name: produce artifact
         run: echo "smoke artifact from run $GITHUB_RUN_ID" > smoke.txt
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: smoke
           path: smoke.txt
