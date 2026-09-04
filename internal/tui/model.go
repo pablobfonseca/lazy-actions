@@ -344,7 +344,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setToast(toastError, text)
 			return m, nil
 		}
-		ids, names, reason := approvableEnvironments(msg.pending)
+		ids, names, reason := approvableEnvironments(msg.pending, time.Now())
 		if reason != "" {
 			m.setToast(toastError, reason)
 			return m, nil
@@ -904,21 +904,54 @@ func isApprovable(run gh.WorkflowRun) bool {
 // approvableEnvironments splits a pending deployments response into the gates
 // this user can clear. An empty reason means there is something to approve;
 // otherwise reason is the toast explaining why there is not.
-func approvableEnvironments(pending []gh.PendingDeployment) (ids []int64, names []string, reason string) {
+func approvableEnvironments(pending []gh.PendingDeployment, now time.Time) (ids []int64, names []string, reason string) {
 	if len(pending) == 0 {
 		return nil, nil, "no pending deployments for this run"
 	}
+	var blocked, timers []gh.PendingDeployment
 	for _, p := range pending {
 		if !p.CurrentUserCanApprove {
+			blocked = append(blocked, p)
+			if p.WaitTimerStartedAt != nil {
+				timers = append(timers, p)
+			}
 			continue
 		}
 		ids = append(ids, p.Environment.ID)
 		names = append(names, p.Environment.Name)
 	}
 	if len(ids) == 0 {
+		if len(timers) == len(blocked) {
+			return nil, nil, waitTimerReason(timers, now)
+		}
 		return nil, nil, "you are not a required reviewer for this run"
 	}
 	return ids, names, ""
+}
+
+// waitTimerReason describes gates held by an environment wait timer. GitHub
+// exposes no public endpoint to skip one: the web UI posts to an internal
+// cookie-session route, and POST pending_deployments rejects timer gates.
+func waitTimerReason(timers []gh.PendingDeployment, now time.Time) string {
+	names := make([]string, 0, len(timers))
+	longest := timers[0]
+	longestLeft := waitTimerRemaining(longest, now)
+	for _, p := range timers {
+		names = append(names, p.Environment.Name)
+		if left := waitTimerRemaining(p, now); left > longestLeft {
+			longest, longestLeft = p, left
+		}
+	}
+	return fmt.Sprintf("%s: %dm wait timer, %s left (API cannot skip timers)",
+		strings.Join(names, ", "), longest.WaitTimer, formatDuration(longestLeft))
+}
+
+func waitTimerRemaining(p gh.PendingDeployment, now time.Time) time.Duration {
+	remaining := p.WaitTimerStartedAt.Add(time.Duration(p.WaitTimer) * time.Minute).Sub(now)
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
 }
 
 func pendingDeploymentsCmd(r gh.RunInfo) tea.Cmd {

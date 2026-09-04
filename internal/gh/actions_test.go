@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"testing"
+	"time"
 )
 
 func TestParsePendingDeployments(t *testing.T) {
@@ -26,13 +27,38 @@ func TestParsePendingDeployments(t *testing.T) {
 				{
 					"environment": {"id": 161088069, "name": "production"},
 					"wait_timer": 0,
+					"wait_timer_started_at": null,
 					"current_user_can_approve": false,
 					"reviewers": []
 				}
 			]`,
 			want: []PendingDeployment{
-				{Environment: DeploymentEnvironment{ID: 161088068, Name: "staging"}, WaitTimer: 30, CurrentUserCanApprove: true},
+				{
+					Environment:           DeploymentEnvironment{ID: 161088068, Name: "staging"},
+					WaitTimer:             30,
+					WaitTimerStartedAt:    timePtr(time.Date(2020, 11, 23, 22, 0, 40, 0, time.UTC)),
+					CurrentUserCanApprove: true,
+				},
 				{Environment: DeploymentEnvironment{ID: 161088069, Name: "production"}, CurrentUserCanApprove: false},
+			},
+		},
+		{
+			name: "timer-held gate the user cannot approve",
+			body: `[
+				{
+					"environment": {"id": 161088070, "name": "timer-test"},
+					"wait_timer": 30,
+					"wait_timer_started_at": "2026-09-04T10:09:00Z",
+					"current_user_can_approve": false,
+					"reviewers": []
+				}
+			]`,
+			want: []PendingDeployment{
+				{
+					Environment:        DeploymentEnvironment{ID: 161088070, Name: "timer-test"},
+					WaitTimer:          30,
+					WaitTimerStartedAt: timePtr(time.Date(2026, 9, 4, 10, 9, 0, 0, time.UTC)),
+				},
 			},
 		},
 		{
@@ -63,12 +89,27 @@ func TestParsePendingDeployments(t *testing.T) {
 				t.Fatalf("got %d deployments, want %d", len(got), len(tc.want))
 			}
 			for i := range tc.want {
-				if got[i] != tc.want[i] {
-					t.Errorf("deployment %d: got %+v, want %+v", i, got[i], tc.want[i])
+				g, w := got[i], tc.want[i]
+				if g.Environment != w.Environment || g.WaitTimer != w.WaitTimer || g.CurrentUserCanApprove != w.CurrentUserCanApprove {
+					t.Errorf("deployment %d: got %+v, want %+v", i, g, w)
+				}
+				if !sameTime(g.WaitTimerStartedAt, w.WaitTimerStartedAt) {
+					t.Errorf("deployment %d: wait_timer_started_at: got %v, want %v", i, g.WaitTimerStartedAt, w.WaitTimerStartedAt)
 				}
 			}
 		})
 	}
+}
+
+func timePtr(t time.Time) *time.Time {
+	return &t
+}
+
+func sameTime(a, b *time.Time) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.Equal(*b)
 }
 
 func TestApprovalRequestBody(t *testing.T) {

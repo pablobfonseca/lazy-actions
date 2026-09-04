@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // ErrNotRerunnable is returned when a run cannot be re-run (still running,
@@ -82,6 +83,7 @@ type DeploymentEnvironment struct {
 type PendingDeployment struct {
 	Environment           DeploymentEnvironment `json:"environment"`
 	WaitTimer             int                   `json:"wait_timer"`
+	WaitTimerStartedAt    *time.Time            `json:"wait_timer_started_at"`
 	CurrentUserCanApprove bool                  `json:"current_user_can_approve"`
 }
 

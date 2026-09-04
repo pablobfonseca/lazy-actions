@@ -73,6 +73,12 @@ func TestIsApprovable(t *testing.T) {
 }
 
 func TestApprovableEnvironments(t *testing.T) {
+	now := time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC)
+	startedAt := func(d time.Duration) *time.Time {
+		ts := now.Add(d)
+		return &ts
+	}
+
 	cases := []struct {
 		name       string
 		pending    []gh.PendingDeployment
@@ -111,11 +117,74 @@ func TestApprovableEnvironments(t *testing.T) {
 			wantIDs:   []int64{2},
 			wantNames: []string{"production"},
 		},
+		{
+			name: "wait timer still running",
+			pending: []gh.PendingDeployment{
+				{
+					Environment:        gh.DeploymentEnvironment{ID: 1, Name: "canary-release-wait"},
+					WaitTimer:          60,
+					WaitTimerStartedAt: startedAt(-16 * time.Minute),
+				},
+			},
+			wantReason: "canary-release-wait: 60m wait timer, 44m00s left (API cannot skip timers)",
+		},
+		{
+			name: "elapsed wait timer clamps to zero",
+			pending: []gh.PendingDeployment{
+				{
+					Environment:        gh.DeploymentEnvironment{ID: 1, Name: "timer-test"},
+					WaitTimer:          30,
+					WaitTimerStartedAt: startedAt(-45*time.Minute - 30*time.Second),
+				},
+			},
+			wantReason: "timer-test: 30m wait timer, 0s left (API cannot skip timers)",
+		},
+		{
+			name: "several timers name all and report the longest remaining",
+			pending: []gh.PendingDeployment{
+				{
+					Environment:        gh.DeploymentEnvironment{ID: 1, Name: "timer-short"},
+					WaitTimer:          10,
+					WaitTimerStartedAt: startedAt(-5 * time.Minute),
+				},
+				{
+					Environment:        gh.DeploymentEnvironment{ID: 2, Name: "timer-long"},
+					WaitTimer:          60,
+					WaitTimerStartedAt: startedAt(-30 * time.Minute),
+				},
+			},
+			wantReason: "timer-short, timer-long: 60m wait timer, 30m00s left (API cannot skip timers)",
+		},
+		{
+			name: "timer alongside a reviewer gate keeps the reviewer message",
+			pending: []gh.PendingDeployment{
+				{
+					Environment:        gh.DeploymentEnvironment{ID: 1, Name: "timer-test"},
+					WaitTimer:          30,
+					WaitTimerStartedAt: startedAt(-5 * time.Minute),
+				},
+				{Environment: gh.DeploymentEnvironment{ID: 2, Name: "approval-test"}},
+			},
+			wantReason: "you are not a required reviewer for this run",
+		},
+		{
+			name: "approvable gate wins over a timer gate",
+			pending: []gh.PendingDeployment{
+				{
+					Environment:        gh.DeploymentEnvironment{ID: 1, Name: "timer-test"},
+					WaitTimer:          30,
+					WaitTimerStartedAt: startedAt(-5 * time.Minute),
+				},
+				{Environment: gh.DeploymentEnvironment{ID: 2, Name: "approval-test"}, CurrentUserCanApprove: true},
+			},
+			wantIDs:   []int64{2},
+			wantNames: []string{"approval-test"},
+		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			ids, names, reason := approvableEnvironments(tc.pending)
+			ids, names, reason := approvableEnvironments(tc.pending, now)
 			if reason != tc.wantReason {
 				t.Errorf("reason: got %q, want %q", reason, tc.wantReason)
 			}

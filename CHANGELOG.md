@@ -10,6 +10,16 @@ before you upgrade are called out.
 
 ## [Unreleased]
 
+### Fixed
+
+- Pressing `p` on a run held only by an environment wait timer now names the
+  environment, the timer length, and the time remaining, instead of claiming
+  you are not a required reviewer. That claim was wrong: a timer holds the run
+  regardless of who you are. lazy-actions still cannot skip a timer, because
+  the public API has no endpoint for it; the web UI's "Start all waiting jobs"
+  button posts to an internal cookie-session route. A run blocked by both a
+  timer and a reviewer gate you are not on still gets the reviewer message.
+
 ## [0.2.0] - 2026-09-04
 
 ### Added
