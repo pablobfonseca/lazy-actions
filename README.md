@@ -164,9 +164,11 @@ both darwin architectures, publishes the release, and updates the cask in
 [CHANGELOG.md](CHANGELOG.md) under the new version before tagging.
 
 Publishing the cask writes to a second repository, which a workflow's built-in
-token cannot reach, so the repo needs a `HOMEBREW_TAP_TOKEN` secret holding a PAT
-with `repo` scope. Set it before the first tag: without it the cask step fails, and
-whether the release itself survives that failure is untested.
+token cannot reach, so the repo needs a `HOMEBREW_TAP_TOKEN` secret. Use a
+fine-grained PAT scoped to `pablobfonseca/homebrew-tap` alone with
+`Contents: Read and write`; a classic `repo`-scope token also works but grants write
+to every repo you own. Set it before the first tag: without it the cask step fails,
+and whether the release itself survives that failure is untested.
 
 `make release` does the same thing from a local checkout, using your `gh` token
 for both. It is the fallback for when Actions is unavailable; tagging is the
