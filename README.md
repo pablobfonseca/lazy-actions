@@ -165,8 +165,8 @@ both darwin architectures, publishes the release, and updates the cask in
 
 Publishing the cask writes to a second repository, which a workflow's built-in
 token cannot reach, so the repo needs a `HOMEBREW_TAP_TOKEN` secret holding a PAT
-with `repo` scope. Without it the release still publishes and only the cask step
-fails.
+with `repo` scope. Set it before the first tag: without it the cask step fails, and
+whether the release itself survives that failure is untested.
 
 `make release` does the same thing from a local checkout, using your `gh` token
 for both. It is the fallback for when Actions is unavailable; tagging is the
