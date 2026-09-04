@@ -97,7 +97,7 @@ writes the file. A single agent working alone edits it directly.
 
 ## Verification commands
 
-Run all four; there is no CI, so local checks are the only gate:
+Run all four. CI runs only on tag push (`.github/workflows/release.yml` gates the release on macOS), so for ordinary commits these local checks are the only gate:
 
 ```bash
 go test ./...

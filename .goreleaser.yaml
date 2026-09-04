@@ -32,6 +32,7 @@ homebrew_casks:
       owner: pablobfonseca
       name: homebrew-tap
       branch: master
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     homepage: "https://github.com/pablobfonseca/lazy-actions"
     description: "Bubble Tea TUI that watches GitHub Actions runs and sends desktop/mobile notifications"
     commit_author:

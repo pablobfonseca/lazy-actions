@@ -1,0 +1,58 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    # macOS is the only platform released, and the only one the notification
+    # paths run on, so the gate matches what ships.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "##[error]gofmt needed on:"
+            echo "$unformatted"
+            exit 1
+          fi
+      - name: vet
+        run: go vet ./...
+      - name: test
+        run: go test -race ./...
+
+  release:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # goreleaser derives the version and the previous tag from history;
+          # a shallow clone makes it guess wrong.
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Publishing the cask writes to pablobfonseca/homebrew-tap, which the
+          # job's own GITHUB_TOKEN cannot reach. Needs a PAT with repo scope.
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

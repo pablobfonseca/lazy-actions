@@ -150,6 +150,28 @@ make run        # run against local config
 make help       # list available targets
 ```
 
+### Releasing
+
+Push a tag and GitHub Actions does the rest:
+
+```sh
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+`.github/workflows/release.yml` runs the checks on macOS, then goreleaser builds
+both darwin architectures, publishes the release, and updates the cask in
+`pablobfonseca/homebrew-tap`. Move the `[Unreleased]` section of
+[CHANGELOG.md](CHANGELOG.md) under the new version before tagging.
+
+Publishing the cask writes to a second repository, which a workflow's built-in
+token cannot reach, so the repo needs a `HOMEBREW_TAP_TOKEN` secret holding a PAT
+with `repo` scope. Without it the release still publishes and only the cask step
+fails.
+
+`make release` does the same thing from a local checkout, using your `gh` token
+for both. It is the fallback for when Actions is unavailable; tagging is the
+normal path.
+
 ## Project Layout
 
 ```

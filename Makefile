@@ -41,7 +41,7 @@ clean:
 
 ## release: publish the pushed tag with goreleaser (needs gh auth)
 release:
-	GITHUB_TOKEN="$$(gh auth token)" goreleaser release --clean
+	GITHUB_TOKEN="$$(gh auth token)" HOMEBREW_TAP_TOKEN="$$(gh auth token)" goreleaser release --clean
 
 ## help: list targets
 help:
