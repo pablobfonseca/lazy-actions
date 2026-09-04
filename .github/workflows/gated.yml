@@ -1,8 +1,9 @@
 name: gated
 
-# Fixture for the TUI's approve action (`p`). The deploy job is held at
-# status "waiting" by the approval-test environment's required reviewer,
-# which is the state the run list needs to render and approve.
+# Fixture for the TUI's approve action (`p`). Both deploy jobs hold the run at
+# status "waiting": approval-test through a required reviewer, timer-test
+# through a 30-minute wait timer. Together they cover the two gate shapes the
+# pending_deployments endpoint returns.
 on:
   workflow_dispatch:
 
@@ -18,3 +19,10 @@ jobs:
     environment: approval-test
     steps:
       - run: echo "approved and deployed"
+
+  deploy-timed:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: timer-test
+    steps:
+      - run: echo "timer bypassed and deployed"
