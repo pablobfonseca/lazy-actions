@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -29,6 +30,52 @@ func TestActiveRepoErrors_PrunesExpired(t *testing.T) {
 	}
 	if _, stillThere := m.repoErrors["org/fresh"]; !stillThere {
 		t.Error("expected fresh entry to remain in map")
+	}
+}
+
+func TestRepoFetchResultMsgErrorStampsLastFetch(t *testing.T) {
+	failing := watchKey{"org/failing", "ci.yml"}
+	failingOther := watchKey{"org/failing", "release.yml"}
+	healthy := watchKey{"org/healthy", "ci.yml"}
+
+	m := model{
+		watches: map[watchKey]*watchState{
+			failing:      {},
+			failingOther: {},
+			healthy:      {},
+		},
+		repoWorkflows: map[string][]string{
+			"org/failing": {"ci.yml", "release.yml"},
+			"org/healthy": {"ci.yml"},
+		},
+		repoFetching: map[string]bool{"org/failing": true},
+		repoErrors:   map[string]repoError{},
+	}
+
+	m.Update(repoFetchResultMsg{repo: "org/failing", err: errors.New("boom")})
+
+	for _, key := range []watchKey{failing, failingOther} {
+		if m.watches[key].lastFetch.IsZero() {
+			t.Errorf("%v: lastFetch not stamped after a failed fetch", key)
+		}
+	}
+	if !m.watches[healthy].lastFetch.IsZero() {
+		t.Errorf("%v: lastFetch stamped by an unrelated repo's failure", healthy)
+	}
+	if m.repoFetching["org/failing"] {
+		t.Error("org/failing still marked in-flight after the result arrived")
+	}
+	if _, ok := m.repoErrors["org/failing"]; !ok {
+		t.Error("org/failing missing from repoErrors")
+	}
+
+	m.Update(tickMsg(time.Now()))
+
+	if m.repoFetching["org/failing"] {
+		t.Error("org/failing refetched on the next tick instead of waiting for its interval")
+	}
+	if !m.repoFetching["org/healthy"] {
+		t.Error("org/healthy was not fetched despite a zero lastFetch")
 	}
 }
 

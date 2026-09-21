@@ -19,6 +19,15 @@ before you upgrade are called out.
   the public API has no endpoint for it; the web UI's "Start all waiting jobs"
   button posts to an internal cookie-session route. A run blocked by both a
   timer and a reviewer gate you are not on still gets the reviewer message.
+- A repo whose fetch failed with anything other than a rate limit was
+  refetched on every 100ms tick instead of waiting for its normal interval,
+  hundreds of `gh api` calls a second, exhausting a 5,000/hr token budget in
+  minutes. A failed fetch now waits the repo's normal interval (10s when it
+  has active runs, 180s otherwise), the same as a successful one. Residual:
+  retries are now spaced out instead of refreshing the 15s error banner
+  back-to-back, so a persistently failing idle repo shows "no runs" with no
+  error for most of each 180s cycle instead of an error continuously. `r`
+  forces a refetch and resurfaces it.
 
 ## [0.2.0] - 2026-09-04
 
