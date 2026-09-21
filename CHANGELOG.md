@@ -10,6 +10,8 @@ before you upgrade are called out.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-09-21
+
 ### Fixed
 
 - Pressing `p` on a run held only by an environment wait timer now names the
@@ -123,6 +125,7 @@ brew install pablobfonseca/tap/lazyactions
 - Fix-with-Claude: `C` on a failed run fetches the failed job logs and opens an
   interactive Claude session primed with the run's context.
 
-[Unreleased]: https://github.com/pablobfonseca/lazy-actions/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/pablobfonseca/lazy-actions/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/pablobfonseca/lazy-actions/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/pablobfonseca/lazy-actions/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/pablobfonseca/lazy-actions/releases/tag/v0.1.0
