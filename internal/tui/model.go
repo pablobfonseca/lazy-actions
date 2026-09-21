@@ -260,10 +260,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.rateLimited = false
 		if msg.err != nil {
+			now := time.Now()
 			m.repoErrors[msg.repo] = repoError{
 				repo:    msg.repo,
 				msg:     msg.err.Error(),
-				expires: time.Now().Add(repoErrorTTL),
+				expires: now.Add(repoErrorTTL),
+			}
+			for _, wf := range m.repoWorkflows[msg.repo] {
+				m.watches[watchKey{msg.repo, wf}].lastFetch = now
 			}
 		} else {
 			now := time.Now()
