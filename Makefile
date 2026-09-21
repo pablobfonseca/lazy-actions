@@ -4,7 +4,7 @@ INSTALL_DIR := $(HOME)/.local/bin
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -X main.version=$(VERSION)
 
-.PHONY: build run test vet fmt check install clean release help
+.PHONY: build run test vet fmt check install clean tag release help
 
 ## build: compile binary to ./bin/lazyactions
 build:
@@ -38,6 +38,10 @@ install: build
 ## clean: remove build artifacts
 clean:
 	rm -rf $(BIN_DIR)
+
+## tag: cut a release: roll [Unreleased] into VERSION, commit, tag and push (VERSION=vX.Y.Z)
+tag:
+	@VERSION="$(if $(filter command line,$(origin VERSION)),$(VERSION))" scripts/tag.sh
 
 ## release: publish the pushed tag with goreleaser (needs gh auth)
 release:

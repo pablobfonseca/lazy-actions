@@ -152,16 +152,18 @@ make help       # list available targets
 
 ### Releasing
 
-Push a tag and GitHub Actions does the rest:
+Cut the tag and GitHub Actions does the rest:
 
 ```sh
-git tag v0.2.0 && git push origin v0.2.0
+make tag VERSION=v0.2.1
 ```
 
+It refuses unless master is clean and in sync with origin and
+[CHANGELOG.md](CHANGELOG.md) has something under `[Unreleased]`, then rolls
+that section under the new version, commits, tags and pushes.
 `.github/workflows/release.yml` runs the checks on macOS, then goreleaser builds
 both darwin architectures, publishes the release, and updates the cask in
-`pablobfonseca/homebrew-tap`. Move the `[Unreleased]` section of
-[CHANGELOG.md](CHANGELOG.md) under the new version before tagging.
+`pablobfonseca/homebrew-tap`.
 
 Publishing the cask writes to a second repository, which a workflow's built-in
 token cannot reach, so the repo needs a `HOMEBREW_TAP_TOKEN` secret. Use a
